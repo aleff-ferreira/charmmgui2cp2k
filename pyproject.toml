@@ -1,0 +1,20 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "unit: fast unit tests of the scientific core",
+    "regression: golden-output regression tests",
+    "tui: Textual TUI interaction tests",
+    "integration: end-to-end / launcher tests",
+    "requires_cp2k: needs a CP2K binary available on PATH",
+]
+
+[tool.coverage.run]
+source = ["charmmgui2cp2k"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+# No fail_under threshold yet; Phase 2 ratchets this up as the unit-test
+# suite for the scientific core lands (target >= 85% on the core).

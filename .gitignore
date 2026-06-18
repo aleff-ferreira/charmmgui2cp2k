@@ -1,0 +1,37 @@
+# ── Environments (rebuilt by ./tui install) ──────────────────────────────
+.conda-tui/
+.venv-tui/
+*.egg-info/
+
+# ── Python caches / build ────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.mypy_cache/
+.ruff_cache/
+
+# ── Large reference inputs (Phase 2 replaces with small committed fixtures)
+# These are the bundled 143k-atom reference system; too large for VCS.
+step3_input.parm7
+step3_input.rst7
+step3_input.pdb
+
+# ── Generated run outputs ────────────────────────────────────────────────
+cp2k_output_*/
+runs/
+backup/
+*.tgz
+*.zip
+
+# ── Editor / OS noise ────────────────────────────────────────────────────
+.DS_Store
+*.swp
+*~
+
+# ── Agent / tooling local state (not for publication) ────────────────────
+.claude/
+.codex

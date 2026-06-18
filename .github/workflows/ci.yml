@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: tests (py${{ matrix.python-version }}, textual present)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "textual==8.2.5" pytest pytest-asyncio pyyaml coverage
+      - name: Compile check
+        run: python -m py_compile charmmgui2cp2k.py
+      - name: Import probe (Textual present)
+        run: python -c "import charmmgui2cp2k as c; assert c.HAS_TEXTUAL; print('HAS_TEXTUAL', c.HAS_TEXTUAL)"
+      - name: Run test suite with coverage
+        run: |
+          python -m coverage run -m pytest -q
+          python -m coverage report
+          python -m coverage xml
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-py${{ matrix.python-version }}
+          path: coverage.xml
+          if-no-files-found: ignore
+
+  fallback:
+    name: Textual-absent fallback
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install minimal dependencies (no Textual)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyyaml
+      - name: Compile check
+        run: python -m py_compile charmmgui2cp2k.py
+      - name: Assert graceful CLI fallback when Textual is absent
+        run: |
+          python -c "import charmmgui2cp2k as c; assert c.HAS_TEXTUAL is False; assert not hasattr(c, 'CharmmGui2Cp2kApp'); print('fallback OK')"
+          python charmmgui2cp2k.py --help >/dev/null

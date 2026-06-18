@@ -1,0 +1,10 @@
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - pyyaml
+  - pytest
+  - pytest-asyncio
+  - pip:
+      - textual==8.2.5

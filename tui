@@ -1,0 +1,571 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_PREFIX="${CHARMMGUI2CP2K_CONDA_PREFIX:-${LAAO_TUI_CONDA_PREFIX:-$ROOT/.conda-tui}}"
+ENV_FILE="$ROOT/environment-tui.yml"
+ENV_MARKER="$ENV_PREFIX/.charmmgui2cp2k-tui-env.sha256"
+
+COMMAND="run"
+AUTO_INSTALL=1
+RECREATE_ENV=0
+RUN_TESTS=0
+SKIP_TESTS=0
+RUN_CLI=0
+FORCE_MODE="auto"
+FORCE_MOUSE=""
+FORCE_COMPACT=0
+PLAN_ONLY=0
+VERBOSE=0
+HAS_DIR=0
+APP_ARGS=()
+
+cd "$ROOT"
+
+usage() {
+  cat <<EOF
+Usage: ./tui [command] [options] [input-directory|--dir DIR] [app options]
+
+One command for the CHARMM-GUI -> CP2K TUI. It creates or repairs the local
+Conda environment when needed, detects the current terminal, and launches the
+best frontend mode automatically.
+
+Commands:
+  run          Start the TUI. This is the default.
+  install      Create/repair the Conda environment, then exit.
+  reset        Recreate the Conda environment, then exit.
+  doctor       Print environment and terminal diagnostics, then exit.
+  cli          Start the plain CLI wizard from the same Conda environment.
+  link         Add a user command symlink at ~/.local/bin/charmmgui2cp2k-tui.
+  help         Show this help.
+
+Common options:
+  --screen-safe, --compat, --android
+               Force compact inline mode for GNU screen, Android, Termux,
+               narrow terminals, or terminal apps with unreliable mouse events.
+  --desktop    Force normal full-screen desktop terminal mode.
+  --compact    Hide the sidebar and use the narrow breadcrumb.
+  --mouse      Force Textual mouse handling.
+  --no-mouse   Disable Textual mouse handling.
+  --cli        Use the plain CLI wizard.
+  --plan       Print the selected launch plan without starting the app.
+  --doctor     Same as the doctor command.
+  --reset-env  Rebuild the Conda environment before launch/install.
+  --no-install Do not auto-create or repair the Conda environment.
+  --self-test  Run the TUI regression tests after environment validation.
+  --skip-tests Skip tests during install/reset.
+
+Examples:
+  ./tui
+  ./tui /path/to/charmm-gui-output
+  ./tui --screen-safe
+  ./tui --desktop
+  ./tui doctor
+  ./tui reset
+  ./tui cli
+EOF
+}
+
+log() {
+  printf '%s\n' "$*" >&2
+}
+
+die() {
+  log "ERROR: $*"
+  exit 1
+}
+
+safe_env_prefix_or_die() {
+  case "$ENV_PREFIX" in
+    ""|"/"|"$ROOT"|"/home"|"/usr"|"/usr/local"|"/opt"|"/var"|"/tmp")
+      die "Refusing unsafe Conda environment prefix: $ENV_PREFIX"
+      ;;
+  esac
+  if [[ -n "${HOME:-}" && "$ENV_PREFIX" == "$HOME" ]]; then
+    die "Refusing to use HOME as the Conda environment prefix: $ENV_PREFIX"
+  fi
+}
+
+find_conda() {
+  if [[ -n "${CONDA_EXE:-}" && -x "${CONDA_EXE:-}" ]]; then
+    printf '%s\n' "$CONDA_EXE"
+    return 0
+  fi
+  if command -v conda >/dev/null 2>&1; then
+    command -v conda
+    return 0
+  fi
+  for candidate in \
+    "$HOME/miniforge3/condabin/conda" \
+    "$HOME/mambaforge/condabin/conda" \
+    "$HOME/miniconda3/condabin/conda" \
+    "$HOME/anaconda3/condabin/conda" \
+    "/home/obsidian/anaconda3/condabin/conda"
+  do
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+find_solver() {
+  local conda_bin="$1"
+  if [[ -n "${CHARMMGUI2CP2K_CONDA_SOLVER:-}" && -x "${CHARMMGUI2CP2K_CONDA_SOLVER:-}" ]]; then
+    printf '%s\n' "$CHARMMGUI2CP2K_CONDA_SOLVER"
+    return 0
+  fi
+  if [[ -n "${LAAO_TUI_CONDA_SOLVER:-}" && -x "${LAAO_TUI_CONDA_SOLVER:-}" ]]; then
+    printf '%s\n' "$LAAO_TUI_CONDA_SOLVER"
+    return 0
+  fi
+  if command -v mamba >/dev/null 2>&1; then
+    command -v mamba
+    return 0
+  fi
+  printf '%s\n' "$conda_bin"
+}
+
+env_hash() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$ENV_FILE" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$ENV_FILE" | awk '{print $1}'
+  else
+    cksum "$ENV_FILE" | awk '{print $1}'
+  fi
+}
+
+env_hash_matches() {
+  [[ -f "$ENV_MARKER" ]] || return 1
+  [[ "$(cat "$ENV_MARKER" 2>/dev/null)" == "$(env_hash)" ]]
+}
+
+write_env_marker() {
+  mkdir -p "$ENV_PREFIX"
+  env_hash > "$ENV_MARKER"
+}
+
+install_env_commands() {
+  local pipeline="$ROOT/charmmgui2cp2k.py"
+  [[ -f "$pipeline" ]] || die "Pipeline script not found: $pipeline"
+  mkdir -p "$ENV_PREFIX/bin"
+  chmod +x "$pipeline"
+  rm -f "$ENV_PREFIX/bin/laao-tui"
+  ln -sfn "$pipeline" "$ENV_PREFIX/bin/charmmgui2cp2k"
+  ln -sfn "$pipeline" "$ENV_PREFIX/bin/charmmgui2cp2k-tui"
+}
+
+env_commands_ok() {
+  local pipeline="$ROOT/charmmgui2cp2k.py"
+  [[ -x "$pipeline" ]] || return 1
+  [[ "$(readlink "$ENV_PREFIX/bin/charmmgui2cp2k" 2>/dev/null || true)" == "$pipeline" ]] || return 1
+  [[ "$(readlink "$ENV_PREFIX/bin/charmmgui2cp2k-tui" 2>/dev/null || true)" == "$pipeline" ]] || return 1
+}
+
+env_ready() {
+  env_import_ok && env_hash_matches && env_commands_ok
+}
+
+env_import_ok() {
+  [[ -x "$ENV_PREFIX/bin/python" ]] || return 1
+  "$ENV_PREFIX/bin/python" - <<'PY' >/dev/null 2>&1
+import textual
+import charmmgui2cp2k as c
+assert c.HAS_TEXTUAL
+PY
+}
+
+remove_env() {
+  local conda_bin="$1"
+  safe_env_prefix_or_die
+  if [[ -d "$ENV_PREFIX" ]]; then
+    log "Removing Conda environment: $ENV_PREFIX"
+    if ! "$conda_bin" env remove --prefix "$ENV_PREFIX" -y; then
+      case "$ENV_PREFIX" in
+        "$ROOT/.conda-tui"|*/.conda-tui)
+          rm -rf "$ENV_PREFIX"
+          ;;
+        *)
+          die "Conda could not remove $ENV_PREFIX; refusing manual removal for non-default path."
+          ;;
+      esac
+    fi
+  fi
+}
+
+install_or_repair_env() {
+  local conda_bin solver
+  safe_env_prefix_or_die
+  conda_bin="$(find_conda || true)"
+  [[ -n "$conda_bin" ]] || die "Conda was not found. Install Miniconda/Mambaforge or add conda to PATH."
+  solver="$(find_solver "$conda_bin")"
+
+  if [[ "$RECREATE_ENV" == "1" ]]; then
+    remove_env "$conda_bin"
+  fi
+
+  if [[ -d "$ENV_PREFIX/conda-meta" && ! -x "$ENV_PREFIX/bin/python" ]]; then
+    log "Existing TUI environment is incomplete; rebuilding it."
+    remove_env "$conda_bin"
+  fi
+
+  if [[ ! -d "$ENV_PREFIX/conda-meta" ]]; then
+    log "Creating TUI Conda environment: $ENV_PREFIX"
+    if ! "$solver" env create --prefix "$ENV_PREFIX" --file "$ENV_FILE"; then
+      if [[ "$solver" != "$conda_bin" ]]; then
+        log "Solver failed; retrying with conda."
+        "$conda_bin" env create --prefix "$ENV_PREFIX" --file "$ENV_FILE"
+      else
+        return 1
+      fi
+    fi
+  elif ! env_import_ok || ! env_hash_matches; then
+    log "Repairing/updating existing TUI environment: $ENV_PREFIX"
+    "$conda_bin" install --prefix "$ENV_PREFIX" -y -c conda-forge \
+      python=3.10 pip pyyaml pytest pytest-asyncio
+    "$conda_bin" run --prefix "$ENV_PREFIX" python -m pip install --upgrade "textual==8.2.5"
+  elif [[ "$VERBOSE" == "1" || "$COMMAND" != "run" ]]; then
+    log "TUI Conda environment is ready: $ENV_PREFIX"
+  fi
+
+  env_import_ok || die "TUI environment validation failed after install/repair."
+  install_env_commands
+  write_env_marker
+
+  if [[ "$RUN_TESTS" == "1" && "$SKIP_TESTS" != "1" ]]; then
+    log "Running TUI regression tests..."
+    "$conda_bin" run --prefix "$ENV_PREFIX" python -m pytest -q "$ROOT/tests/test_tui_workbench.py"
+  fi
+}
+
+ensure_env() {
+  if env_ready; then
+    return 0
+  fi
+  if [[ "$AUTO_INSTALL" != "1" ]]; then
+    die "TUI Conda environment is missing or invalid. Run ./tui install or omit --no-install."
+  fi
+  install_or_repair_env
+}
+
+terminal_size() {
+  local rows cols size
+  size="$(stty size 2>/dev/null || true)"
+  if [[ -n "$size" ]]; then
+    rows="${size%% *}"
+    cols="${size##* }"
+    if [[ "$rows" =~ ^[0-9]+$ && "$cols" =~ ^[0-9]+$ ]]; then
+      printf '%s %s\n' "$cols" "$rows"
+      return 0
+    fi
+  fi
+  cols="$(tput cols 2>/dev/null || true)"
+  rows="$(tput lines 2>/dev/null || true)"
+  if [[ "$cols" =~ ^[0-9]+$ && "$rows" =~ ^[0-9]+$ ]]; then
+    printf '%s %s\n' "$cols" "$rows"
+    return 0
+  fi
+  printf '80 24\n'
+}
+
+terminal_profile() {
+  local cols rows size term_name screen_like tmux_like android_like dumb_like small tty_in tty_out
+  size="$(terminal_size)"
+  cols="${size%% *}"
+  rows="${size##* }"
+  term_name="${TERM:-unknown}"
+  screen_like=0
+  tmux_like=0
+  android_like=0
+  dumb_like=0
+  small=0
+  tty_in=0
+  tty_out=0
+  [[ -n "${STY:-}" || "$term_name" == screen* ]] && screen_like=1
+  [[ -n "${TMUX:-}" || "$term_name" == tmux* ]] && tmux_like=1
+  [[ -n "${ANDROID_ROOT:-}" || -n "${ANDROID_DATA:-}" || -n "${TERMUX_VERSION:-}" ]] && android_like=1
+  [[ "$term_name" == "dumb" || "$term_name" == "unknown" ]] && dumb_like=1
+  (( cols < 100 || rows < 28 )) && small=1
+  [[ -t 0 ]] && tty_in=1
+  [[ -t 1 ]] && tty_out=1
+  printf 'term=%s cols=%s rows=%s screen=%s tmux=%s android=%s dumb=%s small=%s tty_in=%s tty_out=%s\n' \
+    "$term_name" "$cols" "$rows" "$screen_like" "$tmux_like" "$android_like" \
+    "$dumb_like" "$small" "$tty_in" "$tty_out"
+}
+
+profile_value() {
+  local profile="$1" key="$2" part
+  for part in $profile; do
+    case "$part" in
+      "$key="*) printf '%s\n' "${part#*=}"; return 0 ;;
+    esac
+  done
+  return 1
+}
+
+select_frontend() {
+  local profile="$1"
+  local screen_like tmux_like android_like dumb_like small tty_in tty_out
+  screen_like="$(profile_value "$profile" screen)"
+  tmux_like="$(profile_value "$profile" tmux)"
+  android_like="$(profile_value "$profile" android)"
+  dumb_like="$(profile_value "$profile" dumb)"
+  small="$(profile_value "$profile" small)"
+  tty_in="$(profile_value "$profile" tty_in)"
+  tty_out="$(profile_value "$profile" tty_out)"
+
+  if [[ "$RUN_CLI" == "1" ]]; then
+    printf 'cli\n'
+  elif [[ "$tty_in" != "1" || "$tty_out" != "1" || "$dumb_like" == "1" ]]; then
+    printf 'cli\n'
+  elif [[ "$FORCE_MODE" == "desktop" ]]; then
+    printf 'desktop\n'
+  elif [[ "$FORCE_MODE" == "compat" ]]; then
+    printf 'compat\n'
+  elif [[ "$screen_like" == "1" || "$tmux_like" == "1" || "$android_like" == "1" || "$small" == "1" ]]; then
+    printf 'compat\n'
+  else
+    printf 'desktop\n'
+  fi
+}
+
+parse_args() {
+  if [[ $# -gt 0 ]]; then
+    case "$1" in
+      run|install|reset|doctor|cli|link|help)
+        COMMAND="$1"
+        shift
+        ;;
+    esac
+  fi
+
+  if [[ "$COMMAND" == "help" ]]; then
+    usage
+    exit 0
+  elif [[ "$COMMAND" == "reset" ]]; then
+    COMMAND="install"
+    RECREATE_ENV=1
+    RUN_TESTS=1
+  elif [[ "$COMMAND" == "cli" ]]; then
+    COMMAND="run"
+    RUN_CLI=1
+  elif [[ "$COMMAND" == "install" ]]; then
+    RUN_TESTS=1
+  fi
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help|--launcher-help)
+        usage
+        exit 0
+        ;;
+      --doctor)
+        COMMAND="doctor"
+        ;;
+      --install)
+        COMMAND="install"
+        RUN_TESTS=1
+        ;;
+      --reset-env|--recreate)
+        RECREATE_ENV=1
+        ;;
+      --no-install)
+        AUTO_INSTALL=0
+        ;;
+      --self-test)
+        RUN_TESTS=1
+        ;;
+      --skip-tests)
+        SKIP_TESTS=1
+        RUN_TESTS=0
+        ;;
+      --plan|--dry-launch)
+        PLAN_ONLY=1
+        ;;
+      --screen-safe|--compat|--android|--phone)
+        FORCE_MODE="compat"
+        ;;
+      --desktop)
+        FORCE_MODE="desktop"
+        ;;
+      --compact)
+        FORCE_COMPACT=1
+        ;;
+      --mouse)
+        FORCE_MOUSE=1
+        ;;
+      --no-mouse)
+        FORCE_MOUSE=0
+        ;;
+      --cli|--plain-cli)
+        RUN_CLI=1
+        ;;
+      --verbose)
+        VERBOSE=1
+        ;;
+      --dir)
+        shift
+        [[ $# -gt 0 ]] || die "Missing directory after --dir."
+        HAS_DIR=1
+        APP_ARGS+=(--dir "$1")
+        ;;
+      --dir=*)
+        HAS_DIR=1
+        APP_ARGS+=("$1")
+        ;;
+      -d)
+        shift
+        [[ $# -gt 0 ]] || die "Missing directory after -d."
+        HAS_DIR=1
+        APP_ARGS+=(--dir "$1")
+        ;;
+      -*)
+        APP_ARGS+=("$1")
+        ;;
+      *)
+        if [[ "$HAS_DIR" == "0" && -d "$1" ]]; then
+          HAS_DIR=1
+          APP_ARGS+=(--dir "$1")
+        elif [[ "$HAS_DIR" == "0" ]]; then
+          die "Input directory not found: $1"
+        else
+          APP_ARGS+=("$1")
+        fi
+        ;;
+    esac
+    shift
+  done
+
+  if [[ "$HAS_DIR" == "0" ]]; then
+    APP_ARGS=(--dir "$ROOT" "${APP_ARGS[@]}")
+  fi
+}
+
+print_plan() {
+  local profile="$1" mode="$2"
+  printf 'root: %s\n' "$ROOT"
+  printf 'env: %s\n' "$ENV_PREFIX"
+  printf 'env_status: '
+  if env_ready; then
+    printf 'ready\n'
+  elif env_import_ok; then
+    printf 'needs-command-install\n'
+  else
+    printf 'missing-or-invalid\n'
+  fi
+  printf 'terminal: %s\n' "$profile"
+  printf 'frontend: %s\n' "$mode"
+  printf 'app_args:'
+  printf ' %q' "${APP_ARGS[@]}"
+  printf '\n'
+}
+
+doctor() {
+  local conda_bin profile mode
+  conda_bin="$(find_conda || true)"
+  profile="$(terminal_profile)"
+  mode="$(select_frontend "$profile")"
+  print_plan "$profile" "$mode"
+  printf 'conda: %s\n' "${conda_bin:-not-found}"
+  printf 'env_commands:\n'
+  printf '  charmmgui2cp2k: %s\n' "$(readlink "$ENV_PREFIX/bin/charmmgui2cp2k" 2>/dev/null || printf 'missing')"
+  printf '  charmmgui2cp2k-tui: %s\n' "$(readlink "$ENV_PREFIX/bin/charmmgui2cp2k-tui" 2>/dev/null || printf 'missing')"
+  if [[ -x "$ENV_PREFIX/bin/python" ]]; then
+    "$ENV_PREFIX/bin/python" - <<'PY'
+import sys
+try:
+    import textual
+    import charmmgui2cp2k as c
+    print(f"python: {sys.executable}")
+    print(f"textual: {textual.__version__}")
+    print(f"HAS_TEXTUAL: {c.HAS_TEXTUAL}")
+except Exception as exc:
+    print(f"python_import_error: {exc}")
+PY
+  fi
+}
+
+link_command() {
+  local target_dir target
+  target_dir="${HOME:-}/.local/bin"
+  [[ -n "$target_dir" ]] || die "HOME is not set; cannot create user command symlink."
+  mkdir -p "$target_dir"
+  target="$target_dir/charmmgui2cp2k-tui"
+  ln -sfn "$ENV_PREFIX/bin/charmmgui2cp2k-tui" "$target"
+  printf 'Linked command: %s -> %s\n' "$target" "$ENV_PREFIX/bin/charmmgui2cp2k-tui"
+  printf 'If needed, add this to PATH: export PATH="$HOME/.local/bin:$PATH"\n'
+}
+
+run_app() {
+  local profile mode conda_bin python_flags app_flags
+  profile="$(terminal_profile)"
+  mode="$(select_frontend "$profile")"
+
+  if [[ "$PLAN_ONLY" == "1" ]]; then
+    print_plan "$profile" "$mode"
+    return 0
+  fi
+
+  ensure_env
+  conda_bin="$(find_conda || true)"
+  [[ -n "$conda_bin" ]] || die "Conda was not found after environment validation."
+
+  app_flags=()
+  case "$mode" in
+    cli)
+      app_flags=(--no-tui)
+      if [[ "$(profile_value "$profile" tty_in)" != "1" || "$(profile_value "$profile" tty_out)" != "1" ]]; then
+        log "No interactive TTY detected; using the plain CLI path."
+      fi
+      ;;
+    compat)
+      app_flags=(--tui --tui-screen-safe)
+      [[ "$FORCE_COMPACT" == "1" ]] && app_flags+=(--tui-compact)
+      if [[ "$FORCE_MOUSE" == "1" ]]; then
+        app_flags+=(--tui-mouse)
+      else
+        app_flags+=(--tui-no-mouse)
+      fi
+      log "Starting TUI in adaptive compatibility mode."
+      log "Terminal: $profile"
+      log "Keys: Tab/Shift-Tab + Enter, Ctrl-N next, Ctrl-P back, Ctrl-Q quit."
+      ;;
+    desktop)
+      app_flags=(--tui)
+      [[ "$FORCE_COMPACT" == "1" ]] && app_flags+=(--tui-compact)
+      [[ "$FORCE_MOUSE" == "0" ]] && app_flags+=(--tui-no-mouse)
+      [[ "$FORCE_MOUSE" == "1" ]] && app_flags+=(--tui-mouse)
+      ;;
+    *)
+      die "Unknown frontend mode: $mode"
+      ;;
+  esac
+
+  exec "$conda_bin" run --no-capture-output --prefix "$ENV_PREFIX" \
+    python "$ROOT/charmmgui2cp2k.py" "${app_flags[@]}" "${APP_ARGS[@]}"
+}
+
+parse_args "$@"
+
+case "$COMMAND" in
+  run)
+    run_app
+    ;;
+  install)
+    install_or_repair_env
+    printf '\nReady. Activate once, then start from anywhere:\n'
+    printf '  conda activate %s\n' "$ENV_PREFIX"
+    printf '  charmmgui2cp2k-tui\n'
+    ;;
+  doctor)
+    doctor
+    ;;
+  link)
+    link_command
+    ;;
+  *)
+    die "Unknown command: $COMMAND"
+    ;;
+esac

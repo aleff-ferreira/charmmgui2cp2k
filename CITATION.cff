@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "charmmgui2cp2k: automated CHARMM-GUI/AMBER to CP2K QM/MM input generator"
+abstract: >-
+  A terminal-native wizard (CLI and Textual TUI) that converts CHARMM-GUI
+  QM/MM Interfacer / AMBER biomolecular setups into validated, immediately
+  runnable CP2K QM/MM input files, with automated link-atom handling,
+  boundary charge redistribution, spin-state risk analysis, and CP2K
+  version-capability gating.
+type: software
+authors:
+  - name: "The charmmgui2cp2k authors"
+    # TODO: replace with given-names / family-names / affiliation / ORCID
+license: MIT
+repository-code: "https://github.com/REPLACE_ME/charmmgui2cp2k"
+keywords:
+  - QM/MM
+  - CP2K
+  - CHARMM-GUI
+  - AMBER
+  - molecular dynamics
+  - computational chemistry
+  - bioinformatics
+version: "0.1.0"
+date-released: "2026-06-18"

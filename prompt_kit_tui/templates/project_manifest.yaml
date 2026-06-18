@@ -1,0 +1,49 @@
+project_name: LAAO_CP2K_QMMM_TUI
+workspace_path: /home/nexus/aleff/fcup/laao_codex
+app_file: charmmgui2cp2k.py
+cli_baseline_command: python3 charmmgui2cp2k.py --non-interactive --dry-run --dir .
+tui_launch_command: python3 charmmgui2cp2k.py --tui --dir .
+tui_framework: Textual
+access_mode: unrestricted full-access mode
+dependency_strategy: isolated virtual environment preferred
+default_venv_path: .venv-tui
+must_preserve:
+  - CLI --help
+  - CLI --non-interactive
+  - CLI --no-tui
+  - Textual-absent fallback import
+  - scientific defaults and core generation behavior
+required_deliverables:
+  - working TUI launch
+  - polished futuristic scientific operations-console design
+  - self-explanatory primary workflow
+  - headless Textual tests
+  - CLI regression tests
+  - fallback tests
+  - UX/design validation evidence
+  - PTY smoke evidence or documented blocker
+  - final report
+  - user runbook
+risk_constraints:
+  - do not modify scientific source inputs
+  - do not claim production scientific correctness from UI tests
+  - do not pollute global Python without explicit reason
+preferred_output_formats:
+  - markdown reports
+  - pytest logs
+  - sha256 manifests
+  - patch rollback notes
+design_requirements:
+  visual_language: restrained futuristic operator console
+  primary_workflow: usable without external documentation
+  navigation: keyboard-first with clear phase state
+  validation: local, concise, actionable, visible
+  advanced_controls: progressively disclosed
+  resize_targets:
+    - 100x30
+    - 120x40
+    - 160x50
+  accessibility:
+    - keyboard-only flow
+    - warnings not color-only
+    - no critical text overlap or clipping

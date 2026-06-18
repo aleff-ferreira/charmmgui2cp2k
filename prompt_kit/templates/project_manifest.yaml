@@ -1,0 +1,43 @@
+project_name: "LAAO_CP2K_QMMM"
+domain: "computational chemistry; molecular simulation; CHARMM-GUI/AMBER to CP2K QM/MM workflow"
+objective: "Use an autonomous agentic workflow to audit, prepare, validate, and report on a CP2K QM/MM project without losing reproducibility or scientific caution."
+workspace_path: "/home/nexus/aleff/fcup/laao_codex"
+access_mode: "unrestricted full-access mode"
+total_time_budget: "[SET_BY_USER]"
+available_inputs:
+  - "charmmgui2cp2k.py"
+  - "input.config.dat"
+  - "step3_input.parm7"
+  - "step3_input.rst7"
+  - "step3_input.pdb"
+  - "step4.0_minimization.mdin"
+  - "step4.1_equilibration.mdin"
+  - "step5_production.mdin"
+  - "cp2k_output_20260418_104734/system_mm.prmtop"
+  - "cp2k_output_20260418_104734/system_qmmm.prmtop"
+required_deliverables:
+  - "phase logs and manifests"
+  - "tool feasibility and environment report"
+  - "input/QC audit"
+  - "candidate generation or workflow output table"
+  - "validation report"
+  - "final report with limitations, negative results, confidence, and next actions"
+risk_constraints:
+  - "maintain unrestricted full-access mode"
+  - "protect original simulation inputs"
+  - "avoid destructive actions unless necessary and reversible"
+  - "record all package installs and external writes"
+  - "do not fabricate missing scientific results"
+preferred_output_formats:
+  - "Markdown"
+  - "CSV or TSV tables where useful"
+  - "JSON or YAML manifests where useful"
+known_tools_or_stack:
+  - "Python 3"
+  - "ParmEd if available"
+  - "AmberTools if available"
+  - "CP2K if available"
+  - "shell utilities: rg, awk, sed, find, sha256sum"
+human_review_requirements:
+  - "review QM region atom selection, charge, multiplicity, link atoms, custom ligand parameters, CP2K compatibility, and validation evidence before production runs"
+
