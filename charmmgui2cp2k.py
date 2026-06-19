@@ -10977,6 +10977,179 @@ def missing_admm_aux_basis_elements(qm_elements, aux_basis, cp2k_data_dir=None):
     return elems - supported
 
 
+# ── Runtime CP2K data-file availability checks (A2.3) ────────────────────────
+#
+# The emitters gate keyword/basis/dispersion choices against the detected CP2K
+# *version*, but version support does not guarantee the corresponding data file
+# is actually installed in this build's data directory.  A missing GTH_POTENTIALS
+# entry, BASIS_ADMM_MOLOPT element, or dftd3.dat then surfaces only as a cryptic
+# CP2K parser error at run time -- on the cluster, after queueing.  These checks
+# verify file/element presence at generation time so the failure is caught early
+# and locally.  All checks degrade to "not checked" (never a false alarm) when
+# no CP2K data directory can be located.
+def locate_cp2k_data_dir(explicit=None, cp2k_info=None):
+    """Best-effort location of the CP2K data directory.
+
+    Resolution order: explicit argument, ``$CP2K_DATA_DIR``, then directories
+    near each detected CP2K binary (``<root>/data`` and
+    ``<root>/share/cp2k/data`` walking up a few levels).  Returns the first
+    directory that actually contains ``GTH_POTENTIALS``, or None.
+    """
+    candidates = []
+    if explicit:
+        candidates.append(explicit)
+    env_dir = os.environ.get('CP2K_DATA_DIR')
+    if env_dir:
+        candidates.append(env_dir)
+    info = cp2k_info or {}
+    for bin_path in (info.get('binaries') or {}).values():
+        node = os.path.dirname(os.path.realpath(bin_path))
+        for _ in range(5):
+            candidates.append(os.path.join(node, 'data'))
+            candidates.append(os.path.join(node, 'share', 'cp2k', 'data'))
+            node = os.path.dirname(node)
+    for cand in candidates:
+        if cand and os.path.isfile(os.path.join(cand, 'GTH_POTENTIALS')):
+            return cand
+    return None
+
+
+def scan_gth_potentials_file(path):
+    """Map element symbol (upper) -> set of GTH potential names it declares.
+
+    CP2K GTH potential files use header lines of the form
+    ``<ELEM> GTH-<FUNC>-q<N> [<ALIAS> ...]`` at column 0, followed by indented
+    or numeric coefficient lines.  Returns an empty dict if unreadable.
+    """
+    table = {}
+    try:
+        with open(path, 'r') as fh:
+            lines = fh.readlines()
+    except (OSError, UnicodeDecodeError):
+        return {}
+    for line in lines:
+        if not line or line[0].isspace():
+            continue
+        stripped = line.strip()
+        if not stripped or stripped[0] in '#!':
+            continue
+        toks = stripped.split()
+        elem = toks[0].upper()
+        if not (1 <= len(elem) <= 2 and elem.isalpha()):
+            continue
+        for tok in toks[1:]:
+            up = tok.upper()
+            if up.startswith('GTH-') or up.startswith('ALL'):
+                table.setdefault(elem, set()).add(tok)
+    return table
+
+
+def parse_qm_kind_potentials(qm_kinds_lines):
+    """Extract (element, potential_name) pairs from emitted &KIND blocks."""
+    pairs = []
+    cur_elem = None
+    cur_pot = None
+    for raw in qm_kinds_lines or []:
+        s = str(raw).strip()
+        up = s.upper()
+        if up.startswith('&KIND'):
+            cur_elem = cur_pot = None
+        elif up.startswith('ELEMENT'):
+            parts = s.split()
+            if len(parts) >= 2:
+                cur_elem = parts[1].upper()
+        elif up.startswith('POTENTIAL'):
+            parts = s.split()
+            if len(parts) >= 2:
+                cur_pot = parts[1]
+        elif up.startswith('&END'):
+            if cur_elem and cur_pot:
+                pairs.append((cur_elem, cur_pot))
+            cur_elem = cur_pot = None
+    return pairs
+
+
+def verify_gth_potentials_available(qm_kinds_lines, cp2k_data_dir,
+                                    gth_file='GTH_POTENTIALS'):
+    """Check every emitted GTH POTENTIAL exists in the CP2K data directory.
+
+    Returns ``{'checked': bool, 'ok': bool, 'missing': [(elem, name), ...],
+    'data_file': path|None, 'reason': str}``.  ``checked`` is False (and never
+    an error) when the data file cannot be located.
+    """
+    if not cp2k_data_dir:
+        return {'checked': False, 'ok': True, 'missing': [],
+                'data_file': None, 'reason': 'no CP2K data directory located'}
+    path = os.path.join(cp2k_data_dir, gth_file)
+    if not os.path.isfile(path):
+        return {'checked': False, 'ok': True, 'missing': [],
+                'data_file': None, 'reason': f'{gth_file} not found in data dir'}
+    table = scan_gth_potentials_file(path)
+    missing = [
+        (elem, pot)
+        for elem, pot in parse_qm_kind_potentials(qm_kinds_lines)
+        if pot not in table.get(elem, set())
+    ]
+    return {'checked': True, 'ok': not missing, 'missing': missing,
+            'data_file': path, 'reason': ''}
+
+
+def verify_dftd3_parameter_file(cp2k_data_dir, dispersion_scheme='DFTD3_BJ',
+                                dat_file='dftd3.dat'):
+    """Check dftd3.dat is present when a DFTD3 dispersion scheme is requested.
+
+    Returns ``{'checked', 'needed', 'present', 'data_file', 'reason'}``.
+    """
+    needed = str(dispersion_scheme or '').upper().startswith('DFTD3')
+    if not needed:
+        return {'checked': False, 'needed': False, 'present': None,
+                'data_file': None, 'reason': 'dispersion scheme is not DFTD3'}
+    if not cp2k_data_dir:
+        return {'checked': False, 'needed': True, 'present': None,
+                'data_file': None, 'reason': 'no CP2K data directory located'}
+    path = os.path.join(cp2k_data_dir, dat_file)
+    return {'checked': True, 'needed': True, 'present': os.path.isfile(path),
+            'data_file': path, 'reason': ''}
+
+
+def verify_cp2k_runtime_data_availability(qm_kinds_lines, qm_elements=None,
+                                          aux_basis=None, use_admm=False,
+                                          dispersion_scheme='DFTD3_BJ',
+                                          cp2k_data_dir=None):
+    """Combined runtime data-file availability audit (GTH / ADMM / DFTD3).
+
+    Returns a dict with per-check results, an overall ``ok`` flag, and a list
+    of human-readable ``issues``.  Designed to never raise; the caller decides
+    whether to warn or (in --strict mode) abort.
+    """
+    gth = verify_gth_potentials_available(qm_kinds_lines, cp2k_data_dir)
+    dftd3 = verify_dftd3_parameter_file(cp2k_data_dir, dispersion_scheme)
+    admm_missing = (
+        sorted(missing_admm_aux_basis_elements(qm_elements, aux_basis,
+                                               cp2k_data_dir=cp2k_data_dir))
+        if use_admm and aux_basis else []
+    )
+
+    issues = []
+    for elem, pot in gth['missing']:
+        issues.append(f"GTH potential {pot} for element {elem} not found in "
+                      f"{gth['data_file']}")
+    if dftd3['needed'] and dftd3['present'] is False:
+        issues.append(f"DFTD3 parameter file not found: {dftd3['data_file']}")
+    for elem in admm_missing:
+        issues.append(f"ADMM auxiliary basis {aux_basis} has no entry for "
+                      f"element {elem}")
+
+    return {
+        'ok': not issues,
+        'cp2k_data_dir': cp2k_data_dir,
+        'gth_potentials': gth,
+        'dftd3_parameters': dftd3,
+        'admm_missing_elements': admm_missing,
+        'issues': issues,
+    }
+
+
 def normalize_admm_exch_correction_func(exch_correction_func):
     """Normalize supported ADMM exchange correction functionals."""
     if exch_correction_func is None:

@@ -1,0 +1,10 @@
+# Minimal stub of a CP2K GTH_POTENTIALS file for tests.
+# Only header lines are needed for availability scanning.
+H GTH-PBE-q1 GTH-PBE
+    1    0    0
+     0.20000000    2    -4.17890044     0.72446331
+C GTH-PBE-q4 GTH-PBE
+    2    2    0
+     0.33847124    2    -8.80367398     1.33921085
+N GTH-PBE-q5 GTH-PBE
+O GTH-PBE-q6 GTH-PBE

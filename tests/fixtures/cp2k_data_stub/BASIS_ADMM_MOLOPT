@@ -1,0 +1,9 @@
+# Minimal stub of BASIS_ADMM_MOLOPT for ADMM coverage scanning.
+H cFIT3
+ 1
+ 1 0 0 4 1
+C cFIT3
+ 1
+ 2 0 1 4 1 1
+N cFIT3
+O cFIT3
