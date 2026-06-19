@@ -1,0 +1,14 @@
+QM/MM production stage for the alanine dipeptide test fixture
+ &cntrl
+  imin=0, irest=1, ntx=5,
+  ntb=0, cut=999.0,
+  ifqnt=1,
+ /
+ &qmmm
+  iqmatoms=11, 12, 13, 14,
+  qmcharge=0,
+  qm_theory='DFTB3',
+  qmcut=8.0,
+  qmshake=0,
+  adjust_q=1
+ /

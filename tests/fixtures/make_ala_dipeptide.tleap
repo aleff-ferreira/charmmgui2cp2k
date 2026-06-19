@@ -1,0 +1,7 @@
+# Reproducible small QM/MM test fixture: alanine dipeptide (ACE-ALA-NME), gas phase.
+# Build:  AMBERHOME=/path/to/amber  $AMBERHOME/bin/tleap -f make_ala_dipeptide.tleap
+source leaprc.protein.ff14SB
+mol = sequence { ACE ALA NME }
+saveamberparm mol ala_dipeptide.parm7 ala_dipeptide.rst7
+savepdb mol ala_dipeptide.pdb
+quit

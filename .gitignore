@@ -35,3 +35,4 @@ backup/
 # ── Agent / tooling local state (not for publication) ────────────────────
 .claude/
 .codex
+leap.log
