@@ -1631,6 +1631,52 @@ def verify_prmtop_charges_match_manifest(
         )
 
 
+# ── Strict-mode generation gate (A3.3) ──────────────────────────────────────
+#
+# By default the scientific checks (charge conservation, link geometry, runtime
+# data availability) only WARN, so a non-interactive batch run still produces
+# output that a human is expected to inspect.  Reproducible pipelines want the
+# opposite: any unresolved scientific concern should fail the run with a
+# non-zero exit so a bad setup never silently reaches a queue.  --strict
+# (alias --fail-on-warn) turns the aggregated concerns below into that hard stop.
+STRICT_GATE_EXIT_CODE = 3
+
+
+def collect_generation_scientific_concerns(charge_conservation=None,
+                                           link_geometry=None,
+                                           data_availability=None):
+    """Flatten the scientific check results into ``[(category, message), ...]``.
+
+    Each argument is the dict returned by the corresponding verify_* function
+    (or None if that check was not run).  Only failing checks contribute.
+    """
+    concerns = []
+    if charge_conservation and not charge_conservation.get('ok', True):
+        concerns += [('charge_conservation', m)
+                     for m in charge_conservation.get('issues', [])]
+    if link_geometry and not link_geometry.get('ok', True):
+        concerns += [('link_geometry', m)
+                     for m in link_geometry.get('issues', [])]
+    if data_availability and not data_availability.get('ok', True):
+        concerns += [('data_availability', m)
+                     for m in data_availability.get('issues', [])]
+    return concerns
+
+
+def enforce_strict_generation_gate(concerns, strict):
+    """Decide the outcome of the generation gate.
+
+    Returns ``(passed: bool, exit_code: int)``.  In non-strict mode the gate
+    always passes (the concerns were already surfaced as warnings); in strict
+    mode any concern fails the gate with ``STRICT_GATE_EXIT_CODE``.
+    """
+    if not concerns:
+        return True, 0
+    if strict:
+        return False, STRICT_GATE_EXIT_CODE
+    return True, 0
+
+
 def write_boundary_charges_audit(out_dir, link_bonds, residual_charge_plan,
                                  boundary_charge_scheme, topo, coords=None):
     """
@@ -16461,6 +16507,13 @@ def _main_cli_wizard():
     parser.add_argument('--dry-run', action='store_true', help='Validate only, do not write files')
     parser.add_argument('--non-interactive', action='store_true', help='Use all defaults without prompting')
     parser.add_argument(
+        '--strict', '--fail-on-warn', dest='strict', action='store_true',
+        help=('Treat unresolved scientific concerns (boundary charge '
+              'non-conservation, implausible link geometry, missing CP2K data '
+              'files) as fatal: exit non-zero instead of only warning. '
+              'Intended for reproducible/batch pipelines.'),
+    )
+    parser.add_argument(
         '--sampling-spec',
         default=None,
         help='External JSON/YAML specification for advanced free-energy sampling (metadynamics or umbrella)',
@@ -20822,6 +20875,34 @@ def _main_cli_wizard():
         print(f"\n  {C.YELLOW}{C.BOLD}Warnings requiring review:{C.R}")
         for w in warnings:
             warn(w)
+
+    # ── Strict-mode generation gate (A3.3) ───────────────────────────────
+    # Re-evaluate the structured scientific checks independently of the audit
+    # writer (which is skipped under --dry-run) so --strict works for both
+    # validate-only and real runs.  In strict mode any unresolved concern is
+    # fatal; otherwise these were already surfaced as warnings above.
+    _strict = bool(getattr(args, 'strict', False))
+    _cp2k_data_dir = locate_cp2k_data_dir(
+        explicit=getattr(args, 'cp2k_data_dir', None),
+        cp2k_info=detect_cp2k_installation(probe_version=False),
+    )
+    _gate_concerns = collect_generation_scientific_concerns(
+        charge_conservation=verify_qmmm_charge_conservation(residual_charge_plan, links),
+        link_geometry=verify_link_geometry(links, coords),
+        data_availability=verify_cp2k_runtime_data_availability(
+            qm_kinds, qm_elements=qm_elements, aux_basis=admm_aux_basis,
+            use_admm=use_admm, dispersion_scheme=_dispersion_scheme_resolved,
+            cp2k_data_dir=_cp2k_data_dir,
+        ),
+    )
+    _gate_passed, _gate_exit = enforce_strict_generation_gate(_gate_concerns, _strict)
+    if not _gate_passed:
+        print(f"\n  {C.RED}{C.BOLD}Strict gate: {len(_gate_concerns)} unresolved "
+              f"scientific concern(s) — refusing to finish.{C.R}")
+        for category, message in _gate_concerns:
+            error(f"[{category}] {message}")
+        import sys as _sys
+        _sys.exit(_gate_exit)
 
     print(f"\n  {C.GREEN}{C.BOLD}Done!{C.R}\n")
 
