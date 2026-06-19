@@ -16,5 +16,8 @@ branch = true
 [tool.coverage.report]
 show_missing = true
 skip_covered = false
-# No fail_under threshold yet; Phase 2 ratchets this up as the unit-test
-# suite for the scientific core lands (target >= 85% on the core).
+# Floor that the CI-runnable suite (unit + regression + golden, no external
+# CP2K/Amber/big-system deps) clears with headroom (~25% as of Phase 2).
+# Ratchets up in later phases as coverage of the emitter and CLI/TUI grows;
+# the long-term target is >= 85% on the scientific core.
+fail_under = 20
