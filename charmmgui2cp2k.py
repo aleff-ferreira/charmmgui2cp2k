@@ -1632,7 +1632,7 @@ def verify_prmtop_charges_match_manifest(
 
 
 def write_boundary_charges_audit(out_dir, link_bonds, residual_charge_plan,
-                                 boundary_charge_scheme, topo):
+                                 boundary_charge_scheme, topo, coords=None):
     """
     Emit a structured audit artifact documenting *both* channels that modify
     charge near the QM/MM boundary.  This makes the two-channel composition
@@ -1665,6 +1665,17 @@ def write_boundary_charges_audit(out_dir, link_bonds, residual_charge_plan,
     charges_raw = topo.get_float_array('CHARGE') or []
     charges_e = [float(c) / AMBER_CHARGE_SCALE for c in charges_raw[:natom]]
     residue_labels = topo.get_string_array('RESIDUE_LABEL') or []
+
+    # ── Link geometry sanity check (A3.2) ───────────────────────────────
+    # Populates link['R_QM_MM']/['R_QM_H'] so the per-link payload below
+    # reports real geometry, and flags clashes / non-bonds when coordinates
+    # are available.  Degrades silently to status 'unknown' without coords.
+    link_geometry = verify_link_geometry(link_bonds, coords)
+    if not link_geometry['ok']:
+        warn("Link geometry check raised concerns; see boundary_charges.dat "
+             "[LINK_GEOMETRY]:")
+        for issue in link_geometry['issues']:
+            warn(f"  {issue}")
 
     # ── Per-link payload ────────────────────────────────────────────────
     link_entries = []
@@ -1773,6 +1784,7 @@ def write_boundary_charges_audit(out_dir, link_bonds, residual_charge_plan,
             sum(e['m1_charge_e'] for e in link_entries if boundary_charge_scheme in BOUNDARY_CHARGE_REDISTRIBUTION_SCHEMES)
         ),
         'charge_conservation': conservation,
+        'link_geometry': link_geometry,
         'links': link_entries,
         'residual_redistribution': residual_entries,
         'per_atom_boundary_composition': per_atom,
@@ -1830,6 +1842,10 @@ def write_boundary_charges_audit(out_dir, link_bonds, residual_charge_plan,
         for line in format_qmmm_charge_conservation(conservation):
             fh.write(f"{line}\n")
 
+        fh.write("\n[LINK_GEOMETRY]\n")
+        for line in format_link_geometry(link_geometry):
+            fh.write(f"{line}\n")
+
     return {
         'json_path': json_path,
         'dat_path': dat_path,
@@ -1837,6 +1853,7 @@ def write_boundary_charges_audit(out_dir, link_bonds, residual_charge_plan,
         'n_redistributed_residues': len(residual_entries),
         'n_atoms_touched': len(per_atom),
         'charge_conservation_ok': bool(conservation['ok']),
+        'link_geometry_ok': bool(link_geometry['ok']),
     }
 
 
@@ -3224,6 +3241,109 @@ def enrich_link_with_m2(links, adjacency, qm_indices_set, charges_e,
             link['M1_CHARGE_E'] = float(charges_e[m1 - 1])
         else:
             link['M1_CHARGE_E'] = 0.0
+
+
+# ── Link-bond geometry sanity checks (A3.2) ─────────────────────────────────
+#
+# detect_link_bonds() finds bonds crossing the QM/MM boundary from topology
+# connectivity alone; it never checks that the two atoms are at a physically
+# sensible distance.  A QM-MM "bond" far shorter than a covalent bond signals a
+# steric clash or a mis-assigned cut; one far longer signals that the atoms are
+# not actually bonded (e.g. a stale/incorrect topology) and the link atom would
+# be capped at nonsense geometry.  These problems otherwise surface only as SCF
+# divergence after the job is queued.  Single-bond covalent radii from
+# Cordero et al., Dalton Trans. 2008, 2832 (Å).
+COVALENT_RADII_ANG = {
+    'H': 0.31, 'B': 0.84, 'C': 0.76, 'N': 0.71, 'O': 0.66, 'F': 0.57,
+    'NA': 1.66, 'MG': 1.41, 'P': 1.07, 'S': 1.05, 'CL': 1.02,
+    'K': 2.03, 'CA': 1.76, 'MN': 1.39, 'FE': 1.32, 'CO': 1.26,
+    'NI': 1.24, 'CU': 1.32, 'ZN': 1.22, 'SE': 1.20, 'BR': 1.20, 'I': 1.39,
+}
+# Fractional tolerance on the expected covalent bond length before a link is
+# flagged.  ±40% is permissive enough not to fire on normal force-field bond
+# stretching yet still catches clashes (<~0.5x) and non-bonds (>~1.5x).
+LINK_GEOMETRY_TOLERANCE_FRAC = 0.40
+
+
+def expected_covalent_bond_length(elem_a, elem_b):
+    """Sum of single-bond covalent radii (Å), or None if either is unknown."""
+    ra = COVALENT_RADII_ANG.get(str(elem_a).strip().upper())
+    rb = COVALENT_RADII_ANG.get(str(elem_b).strip().upper())
+    if ra is None or rb is None:
+        return None
+    return ra + rb
+
+
+def verify_link_geometry(links, coords, tolerance_frac=LINK_GEOMETRY_TOLERANCE_FRAC):
+    """Compute QM-MM cut distances and flag implausible link geometries.
+
+    Mutates each link in place, recording ``R_QM_MM`` (the QM-M1 distance, Å)
+    and ``R_QM_H`` (the covalent QM-H cap length, Å) so the boundary audit can
+    report real geometry.  Returns::
+
+        {'ok': bool, 'links': [ {qm_index, mm_index, qm_elem, mm_elem,
+                                 distance_A, expected_A, status}, ... ],
+         'issues': [str, ...]}
+
+    ``status`` is 'ok', 'short', 'long', or 'unknown' (missing radius/coords).
+    Never raises; degrades to status 'unknown' when coordinates are absent.
+    """
+    n = len(coords or [])
+    results = []
+    issues = []
+    for link in links or []:
+        qi = int(link.get('QM_INDEX') or 0)
+        mi = int(link.get('MM_INDEX') or link.get('M1_INDEX') or 0)
+        qe = str(link.get('QM_ELEM', ''))
+        me = str(link.get('MM_ELEM', ''))
+        expected = expected_covalent_bond_length(qe, me)
+        if not (1 <= qi <= n and 1 <= mi <= n):
+            results.append({'qm_index': qi, 'mm_index': mi, 'qm_elem': qe,
+                            'mm_elem': me, 'distance_A': None,
+                            'expected_A': expected, 'status': 'unknown'})
+            continue
+        d = _vec_norm(_vec_sub(coords[qi - 1], coords[mi - 1]))
+        link['R_QM_MM'] = float(d)
+        qh = expected_covalent_bond_length(qe, 'H')
+        if qh is not None:
+            link['R_QM_H'] = float(qh)
+        status = 'ok'
+        if expected is None:
+            status = 'unknown'
+        else:
+            lo = expected * (1.0 - tolerance_frac)
+            hi = expected * (1.0 + tolerance_frac)
+            if d < lo:
+                status = 'short'
+            elif d > hi:
+                status = 'long'
+        if status in ('short', 'long'):
+            issues.append(
+                f"link QM={qi}({qe})-M1={mi}({me}) distance {d:.3f} Å is "
+                f"{status} vs expected covalent {expected:.3f} Å "
+                f"(±{int(tolerance_frac * 100)}%)"
+            )
+        results.append({'qm_index': qi, 'mm_index': mi, 'qm_elem': qe,
+                        'mm_elem': me, 'distance_A': float(d),
+                        'expected_A': expected, 'status': status})
+    return {'ok': not issues, 'links': results, 'issues': issues}
+
+
+def format_link_geometry(audit):
+    """Render the link-geometry audit as report lines."""
+    status_word = 'OK' if audit['ok'] else 'WARNINGS'
+    lines = [f"Link geometry: {status_word}"]
+    lines.append("# qm_index  qm_elem  m1_index  m1_elem  distance[A]  expected[A]  status")
+    for r in audit['links']:
+        d = '   n/a' if r['distance_A'] is None else f"{r['distance_A']:.3f}"
+        e = '   n/a' if r['expected_A'] is None else f"{r['expected_A']:.3f}"
+        lines.append(
+            f"{r['qm_index']:<9d} {r['qm_elem']:<7s} {r['mm_index']:<9d} "
+            f"{r['mm_elem']:<7s} {d:>10s}  {e:>10s}  {r['status']}"
+        )
+    for issue in audit['issues']:
+        lines.append(f"  ! {issue}")
+    return lines
 
 
 def detect_duplicate_m1_frontier_atoms(links):
@@ -16028,6 +16148,7 @@ if HAS_TEXTUAL:
                         residual_charge_plan=residual_charge_plan,
                         boundary_charge_scheme=boundary_charge_scheme,
                         topo=w.topo,
+                        coords=w.coords,
                     )
                     log_msg(
                         "✓",
@@ -20009,6 +20130,7 @@ def _main_cli_wizard():
                 residual_charge_plan=residual_charge_plan,
                 boundary_charge_scheme=boundary_charge_scheme,
                 topo=topo,
+                coords=coords,
             )
             info(
                 "Wrote boundary-charges audit: "

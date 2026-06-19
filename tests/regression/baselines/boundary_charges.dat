@@ -28,3 +28,8 @@
 Boundary charge conservation: OK (tolerance 1.0e-08 e)
   FIST residual redistribution: 1 split residue(s), 0.001600 e moved, max drift 6.94e-17 e -> consistent
   ADD_MM_CHARGE embedding: 1 link(s), 0.033700 e re-embedded, max drift 0.00e+00 e -> consistent
+
+[LINK_GEOMETRY]
+Link geometry: OK
+# qm_index  qm_elem  m1_index  m1_elem  distance[A]  expected[A]  status
+11        C       9         C            1.525       1.520  ok

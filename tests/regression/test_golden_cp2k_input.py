@@ -106,7 +106,7 @@ def _build_artifacts():
 
     with tempfile.TemporaryDirectory() as d:
         meta = c.write_boundary_charges_audit(
-            d, links, plan, c.DEFAULT_BOUNDARY_CHARGE_SCHEME, topo
+            d, links, plan, c.DEFAULT_BOUNDARY_CHARGE_SCHEME, topo, coords=coords
         )
         boundary_dat = Path(meta["dat_path"]).read_text()
 
