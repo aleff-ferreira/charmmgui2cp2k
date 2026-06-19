@@ -1,0 +1,30 @@
+! Recommended biomolecular default: remove M1 only from the QM/MM embedding seen by the QM region.
+! FIST_SCALE_FACTOR 1.0 preserves the original classical FIST charge while the embedding is corrected.
+! ADD_MM_CHARGE redistributes the removed embedding charge to M2 atoms.
+! CP2K adds one source per block; documented M1->M2 with ALPHA 0.0 places it exactly on M2.
+QMMM_SCALE_FACTOR 0.0
+FIST_SCALE_FACTOR 1.0
+&ADD_MM_CHARGE
+  ATOM_INDEX_1 9
+  ATOM_INDEX_2 7
+  ALPHA  0.0
+  CHARGE  0.0112333333
+  RADIUS 0.800     ! element=X (Laino 2006, Tbl I; fallback=0.8)
+  CORR_RADIUS 0.800
+&END ADD_MM_CHARGE
+&ADD_MM_CHARGE
+  ATOM_INDEX_1 9
+  ATOM_INDEX_2 10
+  ALPHA  0.0
+  CHARGE  0.0112333333
+  RADIUS 0.800     ! element=X (Laino 2006, Tbl I; fallback=0.8)
+  CORR_RADIUS 0.800
+&END ADD_MM_CHARGE
+&ADD_MM_CHARGE
+  ATOM_INDEX_1 9
+  ATOM_INDEX_2 15
+  ALPHA  0.0
+  CHARGE  0.0112333333
+  RADIUS 0.800     ! element=X (Laino 2006, Tbl I; fallback=0.8)
+  CORR_RADIUS 0.800
+&END ADD_MM_CHARGE

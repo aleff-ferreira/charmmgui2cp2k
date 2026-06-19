@@ -1,0 +1,30 @@
+# QM/MM boundary-charge audit
+# Scheme: CHARGE_SHIFT
+# Links: 1    Redistributed residues: 1
+#
+# Channels:
+#   (1) residual redistribution — modifies MM FIST CHARGE array.
+#   (2) ADD_MM_CHARGE (CHARGE_SHIFT) — adds Gaussians in &QMMM/&LINK embedding only.
+# The two channels operate on disjoint Hamiltonians (FIST vs. QM embedding).
+# Refs: Senn & Thiel ACIE 48, 1198 (2009); Laino et al. JCTC 2, 1370 (2006).
+
+[LINKS]
+# qm_index  qm_elem  mm_index  mm_elem  alpha_IMOMM  q(M1)[e]  n_M2
+11        C       9         C       1.380       +0.033700    3
+
+[RESIDUAL_REDISTRIBUTION]
+# res_index  residue  n_targets  removed[e]   delta/atom[e]   strategy
+2           ALA      5          -1.600000e-03  -3.200000e-04  all_mm
+
+[PER_ATOM_COMPOSITION]
+# atom_index  residue  q_original[e]  +delta_residual[e]  +delta_addmm[e]  channels
+7            ALA      -4.157000e-01  -3.200000e-04  +1.123333e-02  residual+addmm
+8            ALA      +2.719000e-01  -3.200000e-04  +0.000000e+00  residual
+10           ALA      +8.230000e-02  -3.200000e-04  +1.123333e-02  residual+addmm
+15           ALA      +5.973000e-01  -3.200000e-04  +1.123333e-02  residual+addmm
+16           ALA      -5.679000e-01  -3.200000e-04  +0.000000e+00  residual
+
+[CHARGE_CONSERVATION]
+Boundary charge conservation: OK (tolerance 1.0e-08 e)
+  FIST residual redistribution: 1 split residue(s), 0.001600 e moved, max drift 6.94e-17 e -> consistent
+  ADD_MM_CHARGE embedding: 1 link(s), 0.033700 e re-embedded, max drift 0.00e+00 e -> consistent
