@@ -283,3 +283,39 @@ def test_format_charge_conservation_reports_status():
     assert "Boundary charge conservation: OK" in text
     assert "FIST residual redistribution" in text
     assert "ADD_MM_CHARGE embedding" in text
+
+
+# ── Boundary & method decision trail (A3.4) ─────────────────────────────────
+def test_decision_trail_records_strategy_and_method():
+    plan = [{"residue_label": "ALA", "redistribute_strategy": "uniform"}]
+    trail = c.build_boundary_decision_trail(
+        residual_charge_plan=plan, boundary_charge_scheme="CHARGE_SHIFT",
+        functional="B3LYP", basis_set="DZVP-MOLOPT-GTH",
+        admm_aux_basis="cFIT3", use_admm=True,
+    )
+    assert trail["boundary_charge_scheme"] == "CHARGE_SHIFT"
+    assert trail["n_redistributed_residues"] == 1
+    assert trail["redistribution_strategies"] == ["uniform"]
+    assert "proxy" in trail["pp_choice"]  # B3LYP uses a GTH-BLYP proxy
+    assert trail["admm"] == "enabled, aux=cFIT3"
+
+
+def test_decision_trail_admm_disabled():
+    trail = c.build_boundary_decision_trail(use_admm=False)
+    assert trail["admm"] == "disabled"
+
+
+def test_decision_trail_emitted_in_electronic_state(tmp_path):
+    qm_meta = {"qm_valence_electrons": 8, "link_electrons_added": 1,
+               "final_electron_count": 8, "link_count": 1, "link_h_valence": 1}
+    trail = c.build_boundary_decision_trail(
+        residual_charge_plan=[{"redistribute_strategy": "uniform"}],
+        boundary_charge_scheme="CHARGE_SHIFT", functional="PBE",
+        basis_set="DZVP-MOLOPT-GTH", use_admm=False,
+    )
+    out = tmp_path / "electronic_state.dat"
+    c.write_electronic_state_dat(str(out), qm_meta, 0, 1, boundary_decisions=trail)
+    text = out.read_text()
+    assert "Boundary & Method Decision Trail" in text
+    assert "REDISTRIBUTION_STRATEGY: uniform" in text
+    assert "PSEUDOPOTENTIAL_CHOICE:" in text

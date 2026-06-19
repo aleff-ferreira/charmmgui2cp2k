@@ -5549,8 +5549,46 @@ class RunProvenance:
             fh.write(self.format_block(prefix=''))
 
 
+def build_boundary_decision_trail(residual_charge_plan=None,
+                                  boundary_charge_scheme=None,
+                                  functional=None, basis_set=None,
+                                  admm_aux_basis=None, use_admm=False):
+    """Summarise the boundary/method decisions for the audit trail (A3.4).
+
+    Returns a dict consumed by write_electronic_state_dat so the human-readable
+    audit records *which* redistribution strategy and pseudopotential/ADMM
+    choices were applied, not only the machine-readable provenance.
+    """
+    strategies = sorted({
+        str(e.get('redistribute_strategy', e.get('strategy', 'uniform')))
+        for e in (residual_charge_plan or [])
+    })
+    trail = {
+        'boundary_charge_scheme': boundary_charge_scheme,
+        'n_redistributed_residues': len(residual_charge_plan or []),
+        'redistribution_strategies': strategies,
+    }
+    if functional:
+        entry = _FUNCTIONAL_TO_PP.get(str(functional).upper())
+        prefix = pp_prefix_for_functional(functional)
+        if entry is not None:
+            match = 'exact' if entry[1] else 'proxy'
+            note = entry[2] if len(entry) > 2 else ''
+            trail['pp_choice'] = f"{prefix} ({match}{'; ' + note if note else ''})"
+        else:
+            trail['pp_choice'] = f"{prefix} (fallback: unknown functional)"
+    if basis_set:
+        trail['basis_set'] = str(basis_set)
+    trail['admm'] = (
+        f"enabled, aux={admm_aux_basis}" if (use_admm and admm_aux_basis)
+        else ('enabled (aux unresolved)' if use_admm else 'disabled')
+    )
+    return trail
+
+
 def write_electronic_state_dat(out_path, qm_meta, qm_charge, multiplicity,
-                               spin_decision=None, scf_routing=None):
+                               spin_decision=None, scf_routing=None,
+                               boundary_decisions=None):
     """
     Write a transparent electron-accounting report for CP2K CHARGE/MULTIPLICITY checks.
 
@@ -5656,6 +5694,27 @@ def write_electronic_state_dat(out_path, qm_meta, qm_charge, multiplicity,
             lines.append("SCF_LEVEL_SHIFT_HARTREE: NONE")
         if sr.get('reason'):
             lines.append(f"SCF_PROFILE_REASON: {sr.get('reason')}")
+
+    # Boundary & method decision trail (A3.4): make the human-readable audit
+    # self-sufficient about the redistribution strategy and PP/ADMM choices.
+    bd = dict(boundary_decisions or {})
+    if bd:
+        lines.append("")
+        lines.append("# ── Boundary & Method Decision Trail ──")
+        if bd.get('boundary_charge_scheme') is not None:
+            lines.append(f"BOUNDARY_CHARGE_SCHEME: {bd.get('boundary_charge_scheme')}")
+        lines.append(f"REDISTRIBUTED_RESIDUES: {int(bd.get('n_redistributed_residues', 0))}")
+        if bd.get('redistribution_strategies'):
+            lines.append(
+                "REDISTRIBUTION_STRATEGY: "
+                + ", ".join(bd['redistribution_strategies'])
+            )
+        if bd.get('pp_choice'):
+            lines.append(f"PSEUDOPOTENTIAL_CHOICE: {bd.get('pp_choice')}")
+        if bd.get('basis_set'):
+            lines.append(f"BASIS_SET: {bd.get('basis_set')}")
+        if bd.get('admm'):
+            lines.append(f"ADMM: {bd.get('admm')}")
 
     lines.append("")
 
@@ -16183,6 +16242,12 @@ if HAS_TEXTUAL:
                         qm_charge=qm_charge,
                         multiplicity=multiplicity,
                         spin_decision=spin_decision,
+                        boundary_decisions=build_boundary_decision_trail(
+                            residual_charge_plan=residual_charge_plan,
+                            boundary_charge_scheme=boundary_charge_scheme,
+                            functional=functional, basis_set=w.basis_set,
+                            use_admm=w.use_admm,
+                        ),
                     )
                     log_msg("✓", "Wrote: electronic_state.dat")
                 except Exception as exc:
@@ -20163,6 +20228,12 @@ def _main_cli_wizard():
             multiplicity=multiplicity,
             spin_decision=spin_decision,
             scf_routing=scf_routing_audit,
+            boundary_decisions=build_boundary_decision_trail(
+                residual_charge_plan=residual_charge_plan,
+                boundary_charge_scheme=boundary_charge_scheme,
+                functional=functional, basis_set=basis_set,
+                admm_aux_basis=admm_aux_basis, use_admm=use_admm,
+            ),
         )
         info(f"Wrote electronic state breakdown: {os.path.basename(electronic_state_out)}")
         if es_meta.get('parity_consistent') is False:
