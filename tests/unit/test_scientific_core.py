@@ -217,3 +217,69 @@ def test_residual_charge_plan_distance_weighted_falls_back_without_coords():
 def test_residual_charge_plan_no_qm_atoms_is_empty():
     topo = FakeTopo([0.5, -0.2, -0.1, -0.2], [1], ["ALA"])
     assert c.build_residual_charge_plan([], topo, m1_set=set()) == []
+
+
+# ── Combined cross-channel charge-conservation audit (A3.1) ─────────────────
+def _consistent_plan():
+    return [
+        {
+            "residue_index": 2, "residue_label": "ALA", "removed_charge_e": 0.5,
+            "updates": [
+                {"old_charge_e": 0.0, "new_charge_e": 0.25},
+                {"old_charge_e": 0.0, "new_charge_e": 0.25},
+            ],
+        }
+    ]
+
+
+def _consistent_links():
+    return [{"QM_INDEX": 11, "M1_INDEX": 9, "M1_CHARGE_E": -0.18,
+             "M2_INDICES": [7, 15]}]
+
+
+def test_charge_conservation_audit_passes_when_both_channels_balance():
+    audit = c.verify_qmmm_charge_conservation(_consistent_plan(), _consistent_links())
+    assert audit["ok"] is True
+    assert audit["fist_residual"]["entries"] == 1
+    assert audit["fist_residual"]["total_moved_e"] == pytest.approx(0.5)
+    assert audit["embedding_add_mm_charge"]["links"] == 1
+    assert audit["embedding_add_mm_charge"]["total_m1_charge_e"] == pytest.approx(0.18)
+    assert audit["issues"] == []
+
+
+def test_charge_conservation_audit_flags_fist_drift():
+    bad_plan = [
+        {
+            "residue_index": 2, "residue_label": "ALA", "removed_charge_e": 0.5,
+            "updates": [{"old_charge_e": 0.0, "new_charge_e": 0.20}],  # only 0.2 applied
+        }
+    ]
+    audit = c.verify_qmmm_charge_conservation(bad_plan, [])
+    assert audit["ok"] is False
+    assert audit["fist_residual"]["consistent"] is False
+    assert any("residual" in m.lower() for m in audit["issues"])
+
+
+def test_charge_conservation_audit_empty_inputs_are_ok():
+    audit = c.verify_qmmm_charge_conservation([], [])
+    assert audit["ok"] is True
+    assert audit["fist_residual"]["entries"] == 0
+    assert audit["embedding_add_mm_charge"]["links"] == 0
+
+
+def test_charge_conservation_audit_ignores_links_without_m2():
+    # A link with no M2 neighbours places no ADD_MM_CHARGE source -> not counted.
+    links = [{"QM_INDEX": 11, "M1_INDEX": 9, "M1_CHARGE_E": -0.18, "M2_INDICES": []}]
+    audit = c.verify_qmmm_charge_conservation([], links)
+    assert audit["ok"] is True
+    assert audit["embedding_add_mm_charge"]["links"] == 0
+
+
+def test_format_charge_conservation_reports_status():
+    lines = c.format_qmmm_charge_conservation(
+        c.verify_qmmm_charge_conservation(_consistent_plan(), _consistent_links())
+    )
+    text = "\n".join(lines)
+    assert "Boundary charge conservation: OK" in text
+    assert "FIST residual redistribution" in text
+    assert "ADD_MM_CHARGE embedding" in text

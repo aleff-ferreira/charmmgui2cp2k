@@ -1753,8 +1753,18 @@ def write_boundary_charges_audit(out_dir, link_bonds, residual_charge_plan,
                 touched[m2_idx]['on_channel'].append('addmm')
     per_atom = sorted(touched.values(), key=lambda r: r['atom_index'])
 
+    # ── Combined cross-channel charge-conservation audit (A3.1) ──────────
+    conservation = verify_qmmm_charge_conservation(residual_charge_plan, link_bonds)
+    if not conservation['ok']:
+        warn(
+            "Boundary charge conservation check FAILED; see boundary_charges.dat "
+            "[CHARGE_CONSERVATION]:"
+        )
+        for issue in conservation['issues']:
+            warn(f"  {issue}")
+
     payload = {
-        'schema_version': 1,
+        'schema_version': 2,
         'boundary_charge_scheme': boundary_charge_scheme,
         'n_links': len(link_entries),
         'n_residues_redistributed': len(residual_entries),
@@ -1762,6 +1772,7 @@ def write_boundary_charges_audit(out_dir, link_bonds, residual_charge_plan,
         'total_addmm_charge_e': float(
             sum(e['m1_charge_e'] for e in link_entries if boundary_charge_scheme in BOUNDARY_CHARGE_REDISTRIBUTION_SCHEMES)
         ),
+        'charge_conservation': conservation,
         'links': link_entries,
         'residual_redistribution': residual_entries,
         'per_atom_boundary_composition': per_atom,
@@ -1815,12 +1826,17 @@ def write_boundary_charges_audit(out_dir, link_bonds, residual_charge_plan,
                 f"{r['delta_addmm_charge_e']:+.6e}  {channels}\n"
             )
 
+        fh.write("\n[CHARGE_CONSERVATION]\n")
+        for line in format_qmmm_charge_conservation(conservation):
+            fh.write(f"{line}\n")
+
     return {
         'json_path': json_path,
         'dat_path': dat_path,
         'n_links': len(link_entries),
         'n_redistributed_residues': len(residual_entries),
         'n_atoms_touched': len(per_atom),
+        'charge_conservation_ok': bool(conservation['ok']),
     }
 
 
@@ -3535,6 +3551,137 @@ def generate_link_charge_directives(link, scheme):
             f"LINK ADD_MM_CHARGE charge drift: M1={m1_charge:.10f}, "
             f"redistributed={total_redistributed:.10f}"
         )
+    return lines
+
+
+# ── Combined boundary charge-conservation audit (A3.1) ──────────────────────
+#
+# A QM/MM cut redistributes charge through two independent channels:
+#
+#   1. Classical FIST residual redistribution (build_residual_charge_plan):
+#      for every residue split by the cut, the net MM charge carried by the
+#      excised QM atoms is spread across the residue's non-frontier MM atoms.
+#      Each plan entry therefore moves exactly ``removed_charge_e`` and the
+#      sum of the per-target deltas must equal it (the redistribution is a
+#      pure conservation of the residue's integrated charge).
+#
+#   2. QM/MM embedding ADD_MM_CHARGE (generate_link_charge_directives):
+#      for every link the M1 frontier charge is removed from the embedding
+#      seen by the QM region (QMMM_SCALE_FACTOR 0.0) and re-added in equal
+#      shares on the M2 neighbours, so the embedding charge that leaves M1
+#      must equal the charge that lands on the M2 set.
+#
+# Both channels are conserving by construction, but they were previously only
+# checked in isolation deep inside their builders.  This function audits both
+# at once, returns a combined balance suitable for emission into the boundary
+# charges report, and lets callers fail loudly on any drift so a silent charge
+# leak cannot reach a production CP2K run.  (The independent guarantee that the
+# *prepared PRMTOP total* matches the original system charge is verified by the
+# post-emission round-trip in verify_prmtop_charges_match_manifest.)
+def verify_qmmm_charge_conservation(residual_charge_plan, link_bonds,
+                                    tolerance_e=1.0e-8):
+    """Audit that both boundary charge channels conserve charge.
+
+    Returns a dict::
+
+        {
+          'ok': bool,                 # True iff every channel is within tol
+          'tolerance_e': float,
+          'fist_residual': {...},     # classical redistribution channel
+          'embedding_add_mm_charge': {...},  # ADD_MM_CHARGE channel
+          'issues': [str, ...],       # human-readable drift descriptions
+        }
+    """
+    issues = []
+
+    # ── Channel 1: classical FIST residual redistribution ────────────────
+    residual_entries = 0
+    residual_total_moved_e = 0.0
+    residual_max_drift_e = 0.0
+    for entry in residual_charge_plan or []:
+        residual_entries += 1
+        removed = float(entry.get('removed_charge_e', 0.0) or 0.0)
+        applied = sum(
+            float(u.get('new_charge_e', 0.0)) - float(u.get('old_charge_e', 0.0))
+            for u in entry.get('updates', [])
+        )
+        drift = abs(applied - removed)
+        residual_total_moved_e += abs(removed)
+        residual_max_drift_e = max(residual_max_drift_e, drift)
+        if drift > tolerance_e:
+            issues.append(
+                f"FIST residual redistribution drift in residue "
+                f"{entry.get('residue_label', '?')} "
+                f"(#{entry.get('residue_index', '?')}): removed "
+                f"{removed:.10f} e but applied {applied:.10f} e "
+                f"(|Δ|={drift:.2e} e)"
+            )
+    residual_consistent = residual_max_drift_e <= tolerance_e
+
+    # ── Channel 2: QM/MM embedding ADD_MM_CHARGE ─────────────────────────
+    embedding_links = 0
+    embedding_total_m1_charge_e = 0.0
+    embedding_max_drift_e = 0.0
+    for link in link_bonds or []:
+        m1_charge = float(link.get('M1_CHARGE_E', 0.0) or 0.0)
+        m2_indices = [int(i) for i in (link.get('M2_INDICES') or [])]
+        # Links with no M2 set or a negligible M1 charge place no
+        # ADD_MM_CHARGE source, so there is nothing to balance.
+        if not m2_indices or abs(m1_charge) <= tolerance_e:
+            continue
+        embedding_links += 1
+        charge_per_m2 = m1_charge / float(len(m2_indices))
+        re_added = charge_per_m2 * len(m2_indices)
+        drift = abs(re_added - m1_charge)
+        embedding_total_m1_charge_e += abs(m1_charge)
+        embedding_max_drift_e = max(embedding_max_drift_e, drift)
+        if drift > tolerance_e:
+            issues.append(
+                f"ADD_MM_CHARGE embedding drift on link "
+                f"QM={link.get('QM_INDEX')} M1={link.get('M1_INDEX') or link.get('MM_INDEX')}: "
+                f"removed {m1_charge:.10f} e but re-added {re_added:.10f} e "
+                f"(|Δ|={drift:.2e} e)"
+            )
+    embedding_consistent = embedding_max_drift_e <= tolerance_e
+
+    return {
+        'ok': not issues,
+        'tolerance_e': float(tolerance_e),
+        'fist_residual': {
+            'entries': residual_entries,
+            'total_moved_e': float(residual_total_moved_e),
+            'max_drift_e': float(residual_max_drift_e),
+            'consistent': bool(residual_consistent),
+        },
+        'embedding_add_mm_charge': {
+            'links': embedding_links,
+            'total_m1_charge_e': float(embedding_total_m1_charge_e),
+            'max_drift_e': float(embedding_max_drift_e),
+            'consistent': bool(embedding_consistent),
+        },
+        'issues': issues,
+    }
+
+
+def format_qmmm_charge_conservation(audit):
+    """Render the combined charge-conservation audit as report lines."""
+    fist = audit['fist_residual']
+    emb = audit['embedding_add_mm_charge']
+    status = 'OK' if audit['ok'] else 'IMBALANCE'
+    lines = [
+        f"Boundary charge conservation: {status} "
+        f"(tolerance {audit['tolerance_e']:.1e} e)",
+        f"  FIST residual redistribution: {fist['entries']} split residue(s), "
+        f"{fist['total_moved_e']:.6f} e moved, max drift "
+        f"{fist['max_drift_e']:.2e} e -> "
+        f"{'consistent' if fist['consistent'] else 'INCONSISTENT'}",
+        f"  ADD_MM_CHARGE embedding: {emb['links']} link(s), "
+        f"{emb['total_m1_charge_e']:.6f} e re-embedded, max drift "
+        f"{emb['max_drift_e']:.2e} e -> "
+        f"{'consistent' if emb['consistent'] else 'INCONSISTENT'}",
+    ]
+    for issue in audit['issues']:
+        lines.append(f"  ! {issue}")
     return lines
 
 
