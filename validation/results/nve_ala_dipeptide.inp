@@ -1,0 +1,339 @@
+&GLOBAL
+  PROJECT nve_ala_dipeptide
+  RUN_TYPE MD
+  PRINT_LEVEL LOW
+&END GLOBAL
+
+&FORCE_EVAL
+  METHOD QMMM
+
+  &DFT
+    BASIS_SET_FILE_NAME BASIS_MOLOPT
+    POTENTIAL_FILE_NAME GTH_POTENTIALS
+
+    CHARGE 0
+    MULTIPLICITY 1
+    &MGRID
+      CUTOFF [Ry] 400
+      REL_CUTOFF [Ry] 50
+      NGRIDS 5
+      COMMENSURATE T
+    &END MGRID
+
+    &QS
+      METHOD GPW
+      EPS_DEFAULT 1.0E-10
+      ! Explicit MD-specific QS extrapolation per CP2K MD guidance.
+      ! Omitting this would inherit the generic QS default ASPC/3.
+      EXTRAPOLATION PS
+      EXTRAPOLATION_ORDER 3
+    &END QS
+
+    ! Explicit periodic QM Poisson solver for periodic QM/MM electrostatics.
+    ! This avoids relying on CP2K defaults when QMMM uses periodic Gauss embedding.
+    &POISSON
+      PERIODIC XYZ
+      PSOLVER PERIODIC
+    &END POISSON
+
+    &SCF
+      MAX_SCF 140
+      EPS_SCF 1.0E-06
+      SCF_GUESS ATOMIC
+      &OT
+        MINIMIZER CG
+        PRECONDITIONER FULL_ALL
+        ENERGY_GAP 1.0E-03
+        ! STEPSIZE is the initial OT line-search step only.
+        ! Emit -1.0 explicitly so CP2K chooses the preconditioner-dependent value.
+        STEPSIZE -1.0
+      &END OT
+      &OUTER_SCF
+        MAX_SCF 15
+        EPS_SCF 1.0E-06
+      &END OUTER_SCF
+      &PRINT
+        &ITERATION_INFO
+          &EACH
+            QS_SCF 5
+          &END EACH
+        &END ITERATION_INFO
+      &END PRINT
+    &END SCF
+
+    &PRINT
+      &MULLIKEN
+        &EACH
+          MD 10
+        &END EACH
+      &END MULLIKEN
+      &HIRSHFELD
+        SELF_CONSISTENT T
+        SHAPE_FUNCTION DENSITY
+        &EACH
+          MD 10
+        &END EACH
+      &END HIRSHFELD
+    &END PRINT
+
+    &XC
+      &XC_FUNCTIONAL
+        &PBE
+        &END PBE
+      &END XC_FUNCTIONAL
+
+      &VDW_POTENTIAL
+        POTENTIAL_TYPE PAIR_POTENTIAL
+        &PAIR_POTENTIAL
+          TYPE DFTD3(BJ)
+          PARAMETER_FILE_NAME dftd3.dat
+          REFERENCE_FUNCTIONAL PBE
+        &END PAIR_POTENTIAL
+      &END VDW_POTENTIAL
+    &END XC
+
+  &END DFT
+
+  &MM
+    &FORCEFIELD
+      PARMTYPE AMBER
+      PARM_FILE_NAME system_qmmm.prmtop
+      ! Runtime 1-4 scaling is explicit here via CP2K FORCEFIELD keywords.
+      ! Preserved PRMTOP SCEE/SCNB arrays are retained for topology fidelity only.
+      ! Policy AMBER_RECOMMENDED: Explicit CP2K runtime scaling matching conventional AMBER biomolecular SCEE=1.2 and SCNB=2.0.
+      EI_SCALE14 0.8333333333
+      VDW_SCALE14 0.5000000000
+      &SPLINE
+        EMAX_SPLINE 1.0E8
+        RCUT_NB [angstrom] 10.0
+      &END SPLINE
+    &END FORCEFIELD
+    &PRINT
+      &FF_INFO
+        FILENAME nve_ala_dipeptide_ff_info
+      &END FF_INFO
+    &END PRINT
+    &POISSON
+    ! ── SPME accuracy diagnostic (Kolafa-Perram leading-order tails) ──
+    ! Real-space error ≈ erfc(α·RCUT)/RCUT; reciprocal ≈ (2α/√π)·exp(-k²/4α²)/k.
+    ! A well-tuned PME keeps both tails of the same magnitude (~target tol.).
+    ! PME α = 0.400 Å⁻¹; RCUT_NB = 10.00 Å.
+    ! Real-space tail  ≈ 1.54e-09  (target 1.0e-05).
+    ! Recip-space tail ≈ 2.88e-08 (worst axis; target 1.0e-05).
+      &EWALD
+        EWALD_TYPE SPME
+        ALPHA 0.40
+        ! GMAX: ~1.0 grid point per Angstrom (AMBER PME default density).
+        ! For tighter MM electrostatics, increase by 20-50% (higher FFT cost).
+        GMAX 100 100 100
+      &END EWALD
+    &END POISSON
+  &END MM
+
+  &QMMM
+    ECOUPL GAUSS
+    USE_GEEP_LIB 9
+    &CELL
+      ABC [angstrom] 18.0 18.0 18.0
+      PERIODIC XYZ
+    &END CELL
+    &PERIODIC
+      &MULTIPOLE
+        ! ── &PERIODIC/&MULTIPOLE/RCUT: periodic QM/MM electrostatics (V5 provenance)
+        ! Real-space cutoff of the periodic multipole expansion used to couple the
+        ! QM charge density to the infinite periodic MM image lattice.  Each MM image
+        ! within |r - r_QM| <= RCUT contributes explicitly; the long-range tail is
+        ! resummed via the multipole moments of the QM density (monopole/dipole/
+        ! quadrupole) under an Ewald-style split governed by EWALD_PRECISION below.
+        ! Refs: Laino, Mohamed, Curioni, VandeVondele, JCTC 2, 1370 (2006) — GEEP
+        !       periodic QM/MM multipole decomposition, §2–3 (RCUT role and error
+        !       scaling); CP2K manual, FORCE_EVAL/QMMM/PERIODIC/MULTIPOLE/RCUT
+        !       (subkey stable since CP2K 6.1, see release notes).
+        ! Constraint: RCUT must be <= half the shortest QM cell edge minus a small
+        ! margin, otherwise an atom's own periodic image would fall inside the cutoff
+        ! sphere and the multipole sum would double-count.  The generator therefore
+        ! links QM-cell padding and target RCUT via make_qmmm_periodic_policy().
+        ! Target RCUT 8.0 A with requested half-cell buffer 1.0 A.
+        RCUT [angstrom] 8.0
+        EWALD_PRECISION 1.0E-6
+      &END MULTIPOLE
+    &END PERIODIC
+    &QM_KIND C
+      MM_INDEX 11
+    &END QM_KIND
+    &QM_KIND H
+      MM_INDEX 12 13 14
+    &END QM_KIND
+    ! --- MM_KIND Gaussian-embedding radii -------------
+    ! Per-element RADIUS for GEEP (Laino et al. JCTC 2, 1370, 2006, Tbl I).
+    ! Unlisted elements use the pipeline fallback (0.80 A, CP2K default).
+    &MM_KIND N
+      RADIUS [angstrom] 0.780
+    &END MM_KIND
+    &MM_KIND O
+      RADIUS [angstrom] 0.780
+    &END MM_KIND
+    &LINK
+      QM_KIND H
+      QM_INDEX 11
+      MM_INDEX 9
+      LINK_TYPE IMOMM
+      ALPHA_IMOMM 1.380
+      ! Recommended biomolecular default: remove M1 only from the QM/MM embedding seen by the QM region.
+      ! FIST_SCALE_FACTOR 1.0 preserves the original classical FIST charge while the embedding is corrected.
+      ! ADD_MM_CHARGE redistributes the removed embedding charge to M2 atoms.
+      ! CP2K adds one source per block; documented M1->M2 with ALPHA 0.0 places it exactly on M2.
+      QMMM_SCALE_FACTOR 0.0
+      FIST_SCALE_FACTOR 1.0
+      &ADD_MM_CHARGE
+        ATOM_INDEX_1 9
+        ATOM_INDEX_2 7
+        ALPHA  0.0
+        CHARGE  0.0112333333
+        RADIUS 0.800     ! element=X (Laino 2006, Tbl I; fallback=0.8)
+        CORR_RADIUS 0.800
+      &END ADD_MM_CHARGE
+      &ADD_MM_CHARGE
+        ATOM_INDEX_1 9
+        ATOM_INDEX_2 10
+        ALPHA  0.0
+        CHARGE  0.0112333333
+        RADIUS 0.800     ! element=X (Laino 2006, Tbl I; fallback=0.8)
+        CORR_RADIUS 0.800
+      &END ADD_MM_CHARGE
+      &ADD_MM_CHARGE
+        ATOM_INDEX_1 9
+        ATOM_INDEX_2 15
+        ALPHA  0.0
+        CHARGE  0.0112333333
+        RADIUS 0.800     ! element=X (Laino 2006, Tbl I; fallback=0.8)
+        CORR_RADIUS 0.800
+      &END ADD_MM_CHARGE
+    &END LINK
+  &END QMMM
+
+  &SUBSYS
+    &CELL
+      ABC [angstrom] 100.0 100.0 100.0
+      ALPHA_BETA_GAMMA [deg] 90.0 90.0 90.0
+      PERIODIC XYZ
+    &END CELL
+    &TOPOLOGY
+      CONN_FILE_NAME system_qmmm.prmtop
+      CONNECTIVITY AMBER
+      COORD_FILE_NAME system.xyz
+      COORDINATE XYZ
+    &END TOPOLOGY
+
+    ! ======================================
+    ! QM ELEMENT BASIS AND POTENTIAL MAPPING
+    ! ======================================
+    ! QM basis set selection: DZVP-MOLOPT-GTH
+    ! MGRID NGRIDS: 5
+  &KIND C
+    ELEMENT C
+    BASIS_SET DZVP-MOLOPT-GTH
+    POTENTIAL GTH-PBE-q4
+  &END KIND
+  &KIND H
+    ELEMENT H
+    BASIS_SET DZVP-MOLOPT-GTH
+    POTENTIAL GTH-PBE-q1
+  &END KIND
+
+    ! ======================================
+    ! MM ELEMENT MAPPINGS (CONFORMER KINDS)
+    ! ======================================
+  &KIND T0001
+    ELEMENT H
+  &END KIND
+  &KIND T0002
+    ELEMENT H
+  &END KIND
+  &KIND T0011
+    ELEMENT C
+  &END KIND
+  &KIND T0012
+    ELEMENT C
+  &END KIND
+  &KIND T0013
+    ELEMENT C
+  &END KIND
+  &KIND T002
+    ELEMENT C
+  &END KIND
+  &KIND T0031
+    ELEMENT C
+  &END KIND
+  &KIND T0032
+    ELEMENT C
+  &END KIND
+  &KIND T0041
+    ELEMENT O
+  &END KIND
+  &KIND T0042
+    ELEMENT O
+  &END KIND
+  &KIND T0051
+    ELEMENT N
+  &END KIND
+  &KIND T0052
+    ELEMENT N
+  &END KIND
+  &KIND T0061
+    ELEMENT H
+  &END KIND
+  &KIND T0062
+    ELEMENT H
+  &END KIND
+  &KIND T0071
+    ELEMENT H
+  &END KIND
+  &KIND T0072
+    ELEMENT H
+  &END KIND
+  &END SUBSYS
+&END FORCE_EVAL
+
+&MOTION
+  &MD
+    ENSEMBLE NVE
+    STEPS 100
+    TIMESTEP [fs] 0.5
+    COMVEL_TOL 1.0E-6
+    &PRINT
+      &ENERGY
+        &EACH
+          MD 1
+        &END EACH
+      &END ENERGY
+    &END PRINT
+  &END MD
+
+  &PRINT
+    &TRAJECTORY
+      ! CP2K defaults TRAJECTORY FORMAT to XMOL.
+      ! Pipeline default is DCD for large periodic biomolecular MD because it is binary and stores cell information.
+      FORMAT DCD
+      &EACH
+        MD 100
+      &END EACH
+    &END TRAJECTORY
+    &CELL
+      &EACH
+        MD 100
+      &END EACH
+    &END CELL
+    &RESTART
+      BACKUP_COPIES 3
+      &EACH
+        MD 1000
+      &END EACH
+    &END RESTART
+    &RESTART_HISTORY
+      &EACH
+        MD 5000
+      &END EACH
+    &END RESTART_HISTORY
+  &END PRINT
+&END MOTION

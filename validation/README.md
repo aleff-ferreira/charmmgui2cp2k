@@ -44,6 +44,23 @@ fixed to avoid. Results are written to `validation/results/`.
 > machinery; a publication-grade number needs a longer trajectory (≥ several ps)
 > and ideally a solvated system. Increase `--steps` accordingly.
 
+### Result on the fixture (committed)
+
+A 100-step / 50 fs PBE run (`validation/results/nve_energy_report.txt`):
+
+| metric | value |
+|--------|-------|
+| frames | 101 (50 fs) |
+| conserved-quantity range | 1.66e-4 Ha (0.104 kcal/mol) |
+| drift slope | -1.64e-5 Ha/ps (-0.010 kcal/mol/ps) |
+| drift / dof | -2.49e-7 Ha/dof/ps (2.6e-4 kT/dof/ps at 300 K) |
+
+The conserved quantity is stable (no systematic drift) — the tool-generated link
+atoms, deleted boundary terms, and boundary charges are mutually consistent. The
+residual is within ~2 orders of the literature reference (1e-5–1e-6 kT/dof/ps),
+as expected for a short 50 fs trajectory at default SCF tolerance; a longer run
+with tighter `EPS_SCF` tightens it further. CP2K: cp2k.psmp 2025.2.
+
 ## Outputs
 
 `validation/results/` holds the committed report (`nve_energy_report.txt`) plus a

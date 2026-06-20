@@ -1,0 +1,25 @@
+[1/4] generating topology (CP2K data dir: /home/obsidian/softwares/cp2k/data) ...
+      -> /home/nexus/aleff/fcup/laao_codex/validation/results/nve_workdir/cp2k_output_20260619_233807
+[2/4] assembling self-contained NVE input (functional=PBE, steps=100, dt=0.5 fs) ...
+      -> /home/nexus/aleff/fcup/laao_codex/validation/results/nve_workdir/cp2k_output_20260619_233807/nve_ala_dipeptide.inp  (QM region ~5 centres incl. caps, 22 atoms total)
+[3/4] running CP2K (/home/obsidian/softwares/cp2k/exe/local_cuda/cp2k.psmp) ...
+      -> /home/nexus/aleff/fcup/laao_codex/validation/results/nve_workdir/cp2k_output_20260619_233807/nve_ala_dipeptide.out
+[4/4] analyzing energy conservation ...
+# run: functional=PBE steps=100 dt=0.5 fs T=300.0 K
+# cp2k: /home/obsidian/softwares/cp2k/exe/local_cuda/cp2k.psmp
+# NVE energy-conservation analysis (A4.1)
+frames:                      101
+trajectory_span:             50.00 fs (0.0500 ps)
+degrees_of_freedom (3N):     66
+mean_temperature:            221.50 K
+
+conserved_quantity_range:    1.657e-04 Ha (0.1040 kcal/mol)
+drift_slope:                 -1.644e-05 Ha/ps (-0.0103 kcal/mol/ps)
+drift_per_dof:               -2.491e-07 Ha/dof/ps
+drift_per_dof (|kT| units):  2.622e-04 kT/dof/ps (kT at 300 K)
+
+# Reference: a well-coupled QM/MM boundary typically gives |drift| ~ 1e-5..1e-6 kT/dof/ps
+# (cf. Goetz et al., JCTC 2014, AMBER QM/MM interface).
+
+
+Wrote /home/nexus/aleff/fcup/laao_codex/validation/results/nve_energy_report.txt
