@@ -36,3 +36,7 @@ backup/
 .claude/
 .codex
 leap.log
+
+# ── Validation: bulky transient run dir (wavefunctions, restarts) ────────
+validation/results/nve_workdir/
+validation/_fixture_gen/
