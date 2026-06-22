@@ -37,6 +37,7 @@ backup/
 .codex
 leap.log
 
-# ── Validation: bulky transient run dir (wavefunctions, restarts) ────────
+# ── Validation: bulky transient run dirs (wavefunctions, restarts) ───────
 validation/results/nve_workdir/
+validation/results/sp_workdir/
 validation/_fixture_gen/
