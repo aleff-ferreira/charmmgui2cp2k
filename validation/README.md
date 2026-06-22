@@ -61,6 +61,38 @@ residual is within ~2 orders of the literature reference (1e-5–1e-6 kT/dof/ps)
 as expected for a short 50 fs trajectory at default SCF tolerance; a longer run
 with tighter `EPS_SCF` tightens it further. CP2K: cp2k.psmp 2025.2.
 
+## A4.2 / A4.3 — single-point reproducibility & boundary over-polarization
+
+```bash
+.conda-tui/bin/python validation/run_singlepoint_probes.py --functional PBE
+```
+
+Result (`validation/results/singlepoint_probes_report.txt`, PBE, cp2k 2025.2):
+
+**A4.2 reproducibility** — the same input run twice gives bitwise-identical
+energy (|Δ| = 5.3e-15 Ha → deterministic), a FAIR prerequisite and a
+precondition for any cross-code comparison.
+
+**A4.3 boundary over-polarization** — single-point QM/MM energy by scheme:
+
+| boundary scheme | E (Ha) | vs CHARGE_SHIFT |
+|---|---|---|
+| NONE (full M1 charge in embedding) | -8.100092 | +2.61 kcal/mol |
+| Z1 (M1 removed from embedding) | -8.104668 | -0.26 kcal/mol |
+| CHARGE_SHIFT (M1 → M2 redistribution) | -8.104248 | 0 |
+
+The 2.6 kcal/mol gap between NONE and the redistribution schemes is the frontier
+over-polarization the schemes are designed to remove; Z1 and CHARGE_SHIFT (both
+remove M1 from the embedding) agree closely. This confirms the boundary charge
+treatment is physically active and well-behaved.
+
+## A4.4 / A4.5 — awaiting data
+
+A4.4 (BioExcel GROMACS+CP2K benchmark suite: MQAE, ClC, CBD_PHY, GFP) needs the
+external suite download. A4.5 (headline metalloprotein active-site case, the
+production LAAO system) needs that system. Both run through the same generation +
+harness via `--dir`; see RELEASE_CHECKLIST.md.
+
 ## Outputs
 
 `validation/results/` holds the committed report (`nve_energy_report.txt`) plus a

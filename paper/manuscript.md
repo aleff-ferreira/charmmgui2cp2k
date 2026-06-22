@@ -102,11 +102,14 @@ toward the literature reference (1e-5–1e-6 kT/dof/ps; Götz et al., JCTC 2014)
 
 ### 3.3 Boundary handling and reproducibility
 Single-point energies under the NONE / Z1 / CHARGE_SHIFT boundary schemes differ
-measurably (`validation/results/singlepoint_probes_report.txt`), confirming the
-charge treatment is physically active; NONE (full M1 charge retained in the
-embedding) is the over-polarization baseline the redistribution schemes avoid.
-Repeated runs are bitwise reproducible. Element identities and charges agree with
-an independent ParmEd parse (`tests/unit/test_parmed_crosscheck.py`).
+measurably: NONE (the full M1 frontier charge retained in the embedding) lies
+2.61 kcal/mol from CHARGE_SHIFT, while Z1 and CHARGE_SHIFT (both remove M1 from
+the embedding) agree to 0.26 kcal/mol
+(`validation/results/singlepoint_probes_report.txt`). This confirms the boundary
+charge treatment is physically active and that the redistribution schemes control
+the frontier over-polarization NONE exhibits. Repeated runs are bitwise
+reproducible (|ΔE| = 5×10⁻¹⁵ Ha). Element identities and charges agree with an
+independent ParmEd parse (`tests/unit/test_parmed_crosscheck.py`).
 
 ### 3.4 Metalloprotein case study — TODO
 Headline validation on a metal-containing active site (L-amino-acid oxidase,
