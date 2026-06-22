@@ -2219,6 +2219,7 @@ def build_atom_type_alias_manifest(source_prmtop_path, derived_prmtops, alias_pl
         ('generated_at_utc', datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')),
         ('tool', OrderedDict([
             ('script_name', os.path.basename(__file__)),
+            ('package_version', __version__),
             ('tool_version', f"sha256:{script_hash[:12]}"),
             ('script_sha256', script_hash),
         ])),
