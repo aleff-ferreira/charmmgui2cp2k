@@ -74,6 +74,12 @@ Diagnostics and environment management:
 ./tui cli                     # plain CLI wizard
 ```
 
+One-command quickstart on the bundled demo system (no input files needed):
+
+```bash
+charmmgui2cp2k --no-tui --demo          # generate from the bundled QM/MM demo
+```
+
 After activating the environment once (`conda activate ./.conda-tui`), the
 commands `charmmgui2cp2k` and `charmmgui2cp2k-tui` are available directly.
 

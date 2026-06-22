@@ -14196,6 +14196,45 @@ def _score_mdin_candidate(mdin_path):
     )
 
 
+def locate_demo_data_dir():
+    """Find the bundled demo system (alanine dipeptide), or None.
+
+    Looks next to this script (tests/fixtures) so a fresh checkout can run
+    ``charmmgui2cp2k --demo`` with no input files of its own.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    for cand in (os.path.join(here, 'tests', 'fixtures'),
+                 os.path.join(here, 'demo'),
+                 os.path.join(here, 'fixtures')):
+        if os.path.isfile(os.path.join(cand, 'ala_dipeptide.parm7')):
+            return cand
+    return None
+
+
+def setup_demo_workdir(dest_dir):
+    """Populate *dest_dir* with the bundled demo system under expected names.
+
+    Returns the directory on success; raises FileNotFoundError if the bundled
+    demo data cannot be located.
+    """
+    src = locate_demo_data_dir()
+    if not src:
+        raise FileNotFoundError(
+            "Bundled demo data (tests/fixtures/ala_dipeptide.*) not found; "
+            "cannot run --demo from this installation."
+        )
+    os.makedirs(dest_dir, exist_ok=True)
+    pairs = (
+        ('ala_dipeptide.parm7', 'step3_input.parm7'),
+        ('ala_dipeptide.rst7', 'step3_input.rst7'),
+        ('ala_dipeptide.pdb', 'step3_input.pdb'),
+        ('ala_dipeptide_qmmm.mdin', 'step5_production.mdin'),
+    )
+    for srcname, dstname in pairs:
+        shutil.copy(os.path.join(src, srcname), os.path.join(dest_dir, dstname))
+    return dest_dir
+
+
 def detect_files(directory):
     """Auto-detect CHARMM-GUI QM/MM Interfacer output files."""
     patterns = {
@@ -16611,6 +16650,11 @@ def _main_cli_wizard():
     parser.add_argument('--dry-run', action='store_true', help='Validate only, do not write files')
     parser.add_argument('--non-interactive', action='store_true', help='Use all defaults without prompting')
     parser.add_argument(
+        '--demo', action='store_true',
+        help=('One-command quickstart: generate from the bundled alanine-dipeptide '
+              'demo system (no input files needed). Implies --non-interactive.'),
+    )
+    parser.add_argument(
         '--strict', '--fail-on-warn', dest='strict', action='store_true',
         help=('Treat unresolved scientific concerns (boundary charge '
               'non-conservation, implausible link geometry, missing CP2K data '
@@ -17198,6 +17242,18 @@ def _main_cli_wizard():
 
     # ── Step 1: Directory scan ────────────────────────────────────────────
     step(1, TOTAL_STEPS, "Scanning input directory")
+    if getattr(args, 'demo', False):
+        demo_dir = os.path.abspath(os.path.join(args.dir, 'charmmgui2cp2k_demo'))
+        try:
+            setup_demo_workdir(demo_dir)
+        except FileNotFoundError as exc:
+            error(str(exc))
+            sys.exit(1)
+        args.dir = demo_dir
+        args.non_interactive = True
+        interactive = False
+        info("Demo mode: using the bundled alanine-dipeptide QM/MM system.")
+        detail(f"Demo inputs staged in: {demo_dir}")
     work_dir = os.path.abspath(args.dir)
     info(f"Working directory: {work_dir}")
 
