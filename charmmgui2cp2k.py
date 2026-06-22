@@ -16551,6 +16551,11 @@ if HAS_TEXTUAL:
         CSS = _TUI_CSS
         TITLE = "charmmgui2cp2k"
         SUB_TITLE = "CHARMM-GUI → CP2K QM/MM workbench"
+        # This is a focused wizard, not a command-driven app.  Textual's default
+        # command palette is bound to Ctrl-P, which would otherwise shadow the
+        # documented Ctrl-P = "back" navigation (footer + help advertise it).
+        # Disable it so the keybinding works as the UI claims.
+        ENABLE_COMMAND_PALETTE = False
 
         BINDINGS = [
             Binding("ctrl+q", "quit", "Quit", show=True, priority=True),
