@@ -55,9 +55,10 @@ most.
 ## 2 Implementation
 
 The pipeline is a single Python module exposing three frontends over one shared
-scientific core: a plain CLI wizard, a Textual TUI workbench (eight phases:
-System → QM region → Boundary → Method → Electronic → Workflow → Preview →
-Generate), and a non-interactive batch mode. The core performs:
+scientific core (Figure 1): a plain CLI wizard, a Textual TUI workbench
+(Figure 2; eight phases: System → QM region → Boundary → Method → Electronic →
+Workflow → Preview → Generate), and a non-interactive batch mode. The core
+performs:
 
 - **Topology validation** — AMBER `POINTERS`/array cross-checks, CHAMBER
   rejection, mixed-SCEE detection.
@@ -95,7 +96,7 @@ Every generated staged input passes a real CP2K binary's parser-only
 ### 3.2 NVE energy conservation
 A self-contained NVE QM/MM trajectory of the generated setup (PBE, 50 fs) gives a
 conserved-quantity range of 0.104 kcal/mol and a drift of **2.6×10⁻⁴ kT/dof/ps**
-with no systematic trend (`validation/results/nve_energy_report.txt`),
+with no systematic trend (Figure 3; `validation/results/nve_energy_report.txt`),
 demonstrating the link atoms, deleted boundary terms, and boundary charges are
 mutually consistent. A longer trajectory with tighter SCF tolerance reduces this
 toward the literature reference (1e-5–1e-6 kT/dof/ps; Götz et al., JCTC 2014).
@@ -105,7 +106,7 @@ Single-point energies under the NONE / Z1 / CHARGE_SHIFT boundary schemes differ
 measurably: NONE (the full M1 frontier charge retained in the embedding) lies
 2.61 kcal/mol from CHARGE_SHIFT, while Z1 and CHARGE_SHIFT (both remove M1 from
 the embedding) agree to 0.26 kcal/mol
-(`validation/results/singlepoint_probes_report.txt`). This confirms the boundary
+(Figure 4; `validation/results/singlepoint_probes_report.txt`). This confirms the boundary
 charge treatment is physically active and that the redistribution schemes control
 the frontier over-polarization NONE exhibits. Repeated runs are bitwise
 reproducible (|ΔE| = 5×10⁻¹⁵ Ha). Element identities and charges agree with an
@@ -136,8 +137,56 @@ tests; releases will be archived on Zenodo for a versioned DOI.
 Source code, tests, and the validation harness: TODO_URL (MIT license). Tested on
 Linux with Python 3.10–3.12 and CP2K ≥ 7.1.
 
+## Figures
+
+- **Figure 1.** Architecture and data flow (`figures/fig1_architecture.mmd`).
+- **Figure 2.** TUI workbench, rendered live (`figures/fig2_tui_workbench.svg`).
+- **Figure 3.** NVE energy conservation of the generated QM/MM setup
+  (`figures/fig3_nve_conservation.png`).
+- **Figure 4.** Boundary-scheme over-polarization, single-point energies
+  (`figures/fig4_boundary_scheme.png`).
+
+Figures 3–4 regenerate from committed validation output via
+`figures/make_figures.py`; Figure 2 via `figures/make_tui_screenshot.py`.
+
 ## References
-TODO — Senn & Thiel 2009; Laino et al. JCTC 2005/2006; Götz et al. JCTC 2014;
-Maier et al. (ff14SB) 2015; Hutter et al. (CP2K) 2014; List et al. (Ten Simple
-Rules) 2017; Barker et al. (FAIR4RS) 2022. (Full citations to be inserted from
-the publication-readiness research notes.)
+
+> Verify exact volumes/pages/DOIs against the publishers before submission.
+
+1. Senn HM, Thiel W. QM/MM methods for biomolecular systems. *Angew Chem Int Ed.*
+   2009;48(7):1198–1229.
+2. Lin H, Truhlar DG. QM/MM: what have we learned, where are we, and where do we
+   go from here? *Theor Chem Acc.* 2007;117:185–199.
+3. Laino T, Mohamed F, Curioni A, VandeVondele J. An efficient real space
+   multigrid QM/MM electrostatic coupling. *J Chem Theory Comput.*
+   2005;1(6):1176–1184.
+4. Laino T, Mohamed F, Curioni A, VandeVondele J. An efficient linear-scaling
+   electrostatic coupling for treating periodic boundary conditions in QM/MM
+   simulations. *J Chem Theory Comput.* 2006;2(5):1370–1378.
+5. Kühne TD, Iannuzzi M, Del Ben M, et al. CP2K: An electronic structure and
+   molecular dynamics software package — Quickstep. *J Chem Phys.*
+   2020;152:194103.
+6. Götz AW, Clark MA, Walker RC. An extensible interface for QM/MM molecular
+   dynamics simulations with AMBER. *J Comput Chem.* 2014;35(2):95–108.
+7. Maier JA, Martinez C, Kasavajhala K, Wickstrom L, Hauser KE, Simmerling C.
+   ff14SB: improving the accuracy of protein side chain and backbone parameters.
+   *J Chem Theory Comput.* 2015;11(8):3696–3713.
+8. Grimme S, Ehrlich S, Goerigk L. Effect of the damping function in dispersion
+   corrected density functional theory. *J Comput Chem.* 2011;32(7):1456–1465.
+9. Guidon M, Hutter J, VandeVondele J. Auxiliary density matrix methods for
+   Hartree–Fock exchange calculations. *J Chem Theory Comput.*
+   2010;6(8):2348–2364.
+10. VandeVondele J, Hutter J. Gaussian basis sets for accurate calculations on
+    molecular systems in gas and condensed phases. *J Chem Phys.*
+    2007;127:114105.
+11. Cordero B, Gómez V, Platero-Prats AE, et al. Covalent radii revisited.
+    *Dalton Trans.* 2008;(21):2832–2838.
+12. Jo S, Kim T, Iyer VG, Im W. CHARMM-GUI: a web-based graphical user interface
+    for CHARMM. *J Comput Chem.* 2008;29(11):1859–1865.
+13. Lee J, Cheng X, Swails JM, et al. CHARMM-GUI Input Generator for NAMD,
+    GROMACS, AMBER, OpenMM, and CHARMM/OpenMM simulations. *J Chem Theory
+    Comput.* 2016;12(1):405–413.
+14. List M, Ebert P, Albrecht F. Ten Simple Rules for Developing Usable Software
+    in Computational Biology. *PLoS Comput Biol.* 2017;13(1):e1005265.
+15. Barker M, Chue Hong NP, Katz DS, et al. Introducing the FAIR Principles for
+    research software. *Sci Data.* 2022;9:622.

@@ -1,0 +1,26 @@
+[1/3] generating topology ...
+[2/3] running single points across boundary schemes (A4.3) ...
+      NONE           E = -8.100091634 Ha
+      Z1             E = -8.104668267 Ha
+      CHARGE_SHIFT   E = -8.104247771 Ha
+[3/3] reproducibility re-run (A4.2) ...
+
+# Single-point QM/MM probes (A4.2 reproducibility, A4.3 boundary scheme)
+# functional=PBE cp2k=/home/obsidian/softwares/cp2k/exe/local_cuda/cp2k.psmp
+
+# A4.3 — boundary-scheme over-polarization (total QM/MM single-point energy)
+E[NONE          ] = -8.100091634 Ha
+E[Z1            ] = -8.104668267 Ha
+E[CHARGE_SHIFT  ] = -8.104247771 Ha
+energy_spread_across_schemes = 2.8719 kcal/mol
+NONE - CHARGE_SHIFT          = 2.6080 kcal/mol (NONE retains full M1 charge in embedding -> over-polarization baseline)
+
+# A4.2 — reproducibility (CHARGE_SHIFT run twice)
+E[run1] = -8.104247770666 Ha
+E[run2] = -8.104247770666 Ha
+|delta| = 5.329e-15 Ha  -> DETERMINISTIC
+
+# Interpretation: a non-zero scheme spread confirms the boundary charge
+# treatment is physically active; bitwise reproducibility is a FAIR
+# prerequisite. Production cross-code/full-QM agreement is the A4.5 case.
+

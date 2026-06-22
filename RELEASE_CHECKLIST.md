@@ -10,13 +10,14 @@ has; the rest are mechanical.
 - [ ] Replace `REPLACE_ME` / `TODO_URL` repository URLs in `README.md` and
       `CITATION.cff` with the real GitHub URL.
 
-## 2. Prune internal scaffolding before going public **[user decision]**
-The repo currently tracks autonomous-agent working material not meant for a
-public scientific release. Decide per item — delete, or move under `docs/dev/`:
-- [ ] `AGENTS.md` (autonomous-agent operating instructions)
-- [ ] `prompt_kit/`, `prompt_kit_tui/` (phase-gated agent prompt kits)
-- [ ] `PUBLICATION_READINESS_PLAN.md` (internal roadmap — keep or move to docs/)
-- [ ] Confirm `.gitignore` still excludes `.claude/`, envs, generated outputs.
+## 2. Internal scaffolding — DONE (moved to docs/dev/)
+The autonomous-agent working material has been moved out of the public top level
+into `docs/dev/` (reversible; `git rm -r docs/dev/` for total removal):
+- [x] `AGENTS.md` → `docs/dev/AGENTS.md`
+- [x] `prompt_kit/`, `prompt_kit_tui/` → `docs/dev/`
+- [x] `PUBLICATION_READINESS_PLAN.md` → `docs/dev/`
+- [ ] **[user]** decide whether to delete `docs/dev/` entirely before release.
+- [x] `.gitignore` excludes `.claude/`, envs, generated outputs.
 
 ## 3. Make the repository public **[user]**
 - [ ] Create the public GitHub repo and push `main`

@@ -1,0 +1,32 @@
+%% Figure 1 — charmmgui2cp2k architecture.
+%% Render: mmdc -i fig1_architecture.mmd -o fig1_architecture.png  (mermaid-cli)
+flowchart TB
+    subgraph IN[Inputs: CHARMM-GUI / AMBER]
+        A1[step3_input.parm7 topology]
+        A2[step3_input.rst7 coordinates]
+        A3[step5_production.mdin QM region]
+    end
+
+    subgraph FE[Frontends - one shared core]
+        F1[CLI wizard]
+        F2[Textual TUI workbench]
+        F3[Non-interactive batch]
+    end
+
+    subgraph CORE[Validated scientific core]
+        C1[Topology validation<br/>POINTERS / CHAMBER / SCEE]
+        C2[QM region + link-atom detection<br/>forbidden-cut rejection, M1/M2, geometry]
+        C3[Boundary charge redistribution<br/>+ cross-channel conservation audit]
+        C4[Electronic structure<br/>electron count, spin-risk, parity]
+        C5[CP2K capability gating<br/>version + data-file availability]
+        C6[Input assembly]
+    end
+
+    subgraph OUT[Outputs]
+        O1[CP2K QM/MM inputs<br/>embedded provenance header]
+        O2[Audit artifacts<br/>boundary_charges, electronic_state,<br/>run_provenance, compat report]
+    end
+
+    IN --> FE --> CORE
+    C1 --> C2 --> C3 --> C4 --> C5 --> C6
+    C6 --> OUT

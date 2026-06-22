@@ -100,7 +100,7 @@ system skip automatically when it is absent.
 ## Project status
 
 Pre-release (`0.1.0`), under active development toward a peer-reviewed software
-publication. See [`PUBLICATION_READINESS_PLAN.md`](PUBLICATION_READINESS_PLAN.md)
+publication. See [`docs/dev/PUBLICATION_READINESS_PLAN.md`](docs/dev/PUBLICATION_READINESS_PLAN.md)
 for the rigor, validation, and usability roadmap.
 
 ## License
