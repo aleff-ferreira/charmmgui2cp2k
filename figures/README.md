@@ -1,16 +1,32 @@
 # Manuscript figures
 
-| File | Figure | Source | How to regenerate |
-|------|--------|--------|-------------------|
-| `fig1_architecture.mmd` | Fig 1: architecture / data flow | hand-authored Mermaid | `mmdc -i fig1_architecture.mmd -o fig1_architecture.png` (mermaid-cli) |
-| `fig2_tui_workbench.svg` | Fig 2: TUI workbench screenshot | live Textual render | `python figures/make_tui_screenshot.py` |
-| `fig3_nve_conservation.png` | Fig 3: NVE energy conservation (A4.1) | `validation/results/nve_ala_dipeptide-1.ener` | `python figures/make_figures.py` |
-| `fig4_boundary_scheme.png` | Fig 4: boundary over-polarization (A4.3) | `validation/results/singlepoint_probes_report.txt` | `python figures/make_figures.py` |
+All figures are vector (PDF + SVG) with PNG companions, sharing one style
+(`_style.py`: Okabe–Ito colourblind-safe palette, consistent type scale,
+despined axes).
 
-`make_figures.py` requires matplotlib; `make_tui_screenshot.py` requires Textual.
-Figures 3–4 are fully reproducible from the committed validation outputs. Run all
-from the repo root with the project environment, e.g.
-`./.conda-tui/bin/python figures/make_figures.py`.
+| Files | Figure | Source | Regenerate |
+|-------|--------|--------|------------|
+| `fig1_architecture.{svg,pdf,png}` | Fig 1: architecture / data flow | hand-authored SVG (`fig1_architecture.svg`) | edit the SVG; PDF/PNG via headless Chrome (below) |
+| `fig2_tui.{svg,pdf,png}` | Fig 2: annotated TUI workbench | `fig2_tui_raw.png` (live TUI render) + callouts | `python figures/make_tui_figure.py` |
+| `fig3_validation.{svg,pdf,png}` | Fig 3: (a) NVE conservation, (b) boundary over-polarization | `validation/results/` | `python figures/make_figures.py` |
 
-Pending (need the production system / external suite): a metalloprotein (LAAO)
-case-study figure (A4.5) and a BioExcel benchmark agreement table (A4.4).
+Run from the repo root with the project environment, e.g.
+`./.conda-tui/bin/python figures/make_figures.py`. `make_figures.py` and
+`make_tui_figure.py` require matplotlib.
+
+## Regenerating the raster/PDF from SVG (headless Chrome)
+
+`fig1` is authored as SVG; `fig2_tui_raw.png` is a render of the live TUI SVG.
+Both PDFs/PNGs are produced with headless Chrome, e.g.:
+
+```bash
+# capture the live TUI as SVG, then render it to PNG for annotation
+python figures/make_tui_screenshot.py          # -> fig2_tui_workbench.svg
+google-chrome --headless --screenshot=figures/fig2_tui_raw.png \
+  --force-device-scale-factor=2 --window-size=820,560 figures/fig2_tui_workbench.svg
+```
+
+## Pending (need the production system / external suite)
+
+A flavoenzyme case-study figure (LAAO, FAD cofactor; A4.5) and a BioExcel
+benchmark agreement table (A4.4).

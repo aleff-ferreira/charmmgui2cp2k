@@ -12,7 +12,7 @@ be silently wrong.
 | A4.2 | Cross-code / full-QM single-point agreement | The generated QM/MM single-point energy matches an independent reference | scaffold (see below) |
 | A4.3 | Boundary-scheme over-polarization probe | The charge-redistribution scheme controls frontier over-polarization vs naive deletion | scaffold |
 | A4.4 | BioExcel CP2K QM/MM benchmark suite | Tool-generated input agrees with CP2K-standalone references (MQAE, ClC, CBD_PHY, GFP) | needs suite download |
-| A4.5 | **Metalloprotein active-site case study** | Headline: correctness where boundary/charge handling is most scrutinized | needs the production LAAO system |
+| A4.5 | **Flavoenzyme active-site case study** | Headline: correctness at a redox FAD cofactor (LAAO), where boundary/charge and spin handling are most scrutinized | needs the production LAAO system |
 
 A4.1 runs here on the committed alanine-dipeptide fixture (tiny QM region, fast).
 A4.4/A4.5 require external data / the user's production systems and are driven by
@@ -89,7 +89,7 @@ treatment is physically active and well-behaved.
 ## A4.4 / A4.5 — awaiting data
 
 A4.4 (BioExcel GROMACS+CP2K benchmark suite: MQAE, ClC, CBD_PHY, GFP) needs the
-external suite download. A4.5 (headline metalloprotein active-site case, the
+external suite download. A4.5 (headline flavoenzyme active-site case, the
 production LAAO system) needs that system. Both run through the same generation +
 harness via `--dir`; see RELEASE_CHECKLIST.md.
 

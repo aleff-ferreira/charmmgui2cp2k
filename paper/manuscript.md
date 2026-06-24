@@ -36,9 +36,9 @@ No existing tool closes this gap end to end (Table 1). CHARMM-GUI's QM/MM
 Interfacer is web-based, semiempirical-only, and targets the CHARMM/AMBER
 engines, not CP2K; ASH is a scripting library rather than a guided wizard;
 MiMiCPy targets CPMD+GROMACS. `charmmgui2cp2k` fills this gap and is delivered as
-an offline, terminal-native wizard aimed at enzyme active sites, metalloproteins,
-and redox cofactors — the systems where boundary and charge correctness matter
-most.
+an offline, terminal-native wizard aimed at enzyme active sites, flavoenzymes,
+metalloproteins, and other redox-cofactor systems — where boundary and charge
+correctness matter most.
 
 **Table 1. Landscape of QM/MM setup tools and the gap.**
 
@@ -87,7 +87,7 @@ reproducible pipelines.
 
 All validation is reproducible from `validation/` on a committed alanine-dipeptide
 demo system (build script included); production-scale agreement is the
-metalloprotein case study (§3.4).
+flavoenzyme case study (§3.4).
 
 ### 3.1 Real-CP2K acceptance
 Every generated staged input passes a real CP2K binary's parser-only
@@ -96,7 +96,7 @@ Every generated staged input passes a real CP2K binary's parser-only
 ### 3.2 NVE energy conservation
 A self-contained NVE QM/MM trajectory of the generated setup (PBE, 50 fs) gives a
 conserved-quantity range of 0.104 kcal/mol and a drift of **2.6×10⁻⁴ kT/dof/ps**
-with no systematic trend (Figure 3; `validation/results/nve_energy_report.txt`),
+with no systematic trend (Figure 3a; `validation/results/nve_energy_report.txt`),
 demonstrating the link atoms, deleted boundary terms, and boundary charges are
 mutually consistent. A longer trajectory with tighter SCF tolerance reduces this
 toward the literature reference (1e-5–1e-6 kT/dof/ps; Götz et al., JCTC 2014).
@@ -106,16 +106,18 @@ Single-point energies under the NONE / Z1 / CHARGE_SHIFT boundary schemes differ
 measurably: NONE (the full M1 frontier charge retained in the embedding) lies
 2.61 kcal/mol from CHARGE_SHIFT, while Z1 and CHARGE_SHIFT (both remove M1 from
 the embedding) agree to 0.26 kcal/mol
-(Figure 4; `validation/results/singlepoint_probes_report.txt`). This confirms the boundary
+(Figure 3b; `validation/results/singlepoint_probes_report.txt`). This confirms the boundary
 charge treatment is physically active and that the redistribution schemes control
 the frontier over-polarization NONE exhibits. Repeated runs are bitwise
 reproducible (|ΔE| = 5×10⁻¹⁵ Ha). Element identities and charges agree with an
 independent ParmEd parse (`tests/unit/test_parmed_crosscheck.py`).
 
-### 3.4 Metalloprotein case study — TODO
-Headline validation on a metal-containing active site (L-amino-acid oxidase,
-LAAO), where boundary/charge correctness is most scrutinized: single-point and
-short-MD agreement against a reference, plus a boundary over-polarization probe.
+### 3.4 Flavoenzyme case study — TODO
+Headline validation on a flavoenzyme active site (L-amino-acid oxidase, LAAO; a
+redox-active FAD cofactor), where the QM region spans the flavin and substrate
+and both boundary/charge handling and spin-state assignment are most scrutinized:
+single-point and short-MD agreement against a reference, plus a boundary
+over-polarization probe.
 *(Awaiting the production system; the harness runs unchanged via `--dir`.)*
 
 ### 3.5 Benchmark suite — TODO
@@ -139,15 +141,15 @@ Linux with Python 3.10–3.12 and CP2K ≥ 7.1.
 
 ## Figures
 
-- **Figure 1.** Architecture and data flow (`figures/fig1_architecture.mmd`).
-- **Figure 2.** TUI workbench, rendered live (`figures/fig2_tui_workbench.svg`).
-- **Figure 3.** NVE energy conservation of the generated QM/MM setup
-  (`figures/fig3_nve_conservation.png`).
-- **Figure 4.** Boundary-scheme over-polarization, single-point energies
-  (`figures/fig4_boundary_scheme.png`).
+- **Figure 1.** Architecture and data flow (`figures/fig1_architecture.svg`).
+- **Figure 2.** Annotated TUI workbench, rendered live (`figures/fig2_tui.{svg,pdf,png}`).
+- **Figure 3.** Validation (`figures/fig3_validation.{svg,pdf,png}`):
+  (a) NVE energy conservation; (b) boundary-scheme over-polarization.
 
-Figures 3–4 regenerate from committed validation output via
-`figures/make_figures.py`; Figure 2 via `figures/make_tui_screenshot.py`.
+Figure 3 regenerates from committed validation output via
+`figures/make_figures.py`; Figure 2 via `figures/make_tui_figure.py` (after
+`make_tui_screenshot.py` captures the live TUI). All figures are vector
+(PDF + SVG, plus PNG).
 
 ## References
 

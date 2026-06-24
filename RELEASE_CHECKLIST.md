@@ -38,7 +38,7 @@ into `docs/dev/` (reversible; `git rm -r docs/dev/` for total removal):
 - [ ] Optional: Code Ocean / container image reproducing the validation results.
 
 ## 6. Manuscript
-- [ ] Complete `paper/manuscript.md`: insert citations, the LAAO metalloprotein
+- [ ] Complete `paper/manuscript.md`: insert citations, the LAAO flavoenzyme
       case study (§3.4) and BioExcel benchmark results (§3.5), and figures
       (architecture diagram, TUI screenshot, NVE plot, boundary-scheme probe,
       cross-code table).

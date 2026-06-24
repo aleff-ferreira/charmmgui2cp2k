@@ -233,7 +233,7 @@ Each phase has an explicit **gate**: do not advance without the listed evidence.
 | **P1 — Repo + CI foundation** | Public repo, license, CI skeleton, coverage tooling | Repo live (JOSS clock started); CI green on existing tests; coverage report produced |
 | **P2 — Scientific test net** (A1, A2.1, A3.1) | Unit tests for core, ParmEd cross-check, golden regression baselines, cross-channel charge balance | ≥85% core coverage; ParmEd element/charge parity on all fixtures; regression suite locks outputs |
 | **P3 — Runtime + geometry hardening** (A2.3, A3.2–A3.4) | Data-file existence checks, link geometry checks, strict mode, decision trail | New checks unit-tested; `--strict` fails on scientific WARN; CP2K `--check` passes on all fixtures |
-| **P4 — Validation study** (A4) | NVE drift, cross-code agreement, boundary probe, benchmark suite, metalloprotein case | `validation/` reproduces all figures; numbers meet targets and are DOI-confirmed |
+| **P4 — Validation study** (A4) | NVE drift, cross-code agreement, boundary probe, benchmark suite, flavoenzyme (LAAO) case | `validation/` reproduces all figures; numbers meet targets and are DOI-confirmed |
 | **P5 — Usability pass** (Track B) | Defaults-with-evidence, progressive disclosure, actionable errors, embedded provenance, demo data, resize tests | Red-team user completes full workflow from UI alone, no manual; headless UX tests pass at 3 TTY sizes |
 | **P6 — FAIR release + manuscript** (Track C) | Zenodo DOI, CITATION.cff, reproducibility capsule, manuscript draft | DOI minted; capsule reproduces figures; draft + cover letter ready |
 | **P7 — Submission** | Venue confirmed, submit | Editor confirmation (esp. if BiB); JOSS submission opened in parallel |

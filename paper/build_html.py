@@ -23,94 +23,19 @@ def data_uri(path, mime):
     return f"data:{mime};base64,{b64}"
 
 
-# ── Hand-authored architecture diagram (Figure 1), inline SVG ───────────────
-FIG1_SVG = """
-<svg viewBox="0 0 760 660" role="img" aria-label="charmmgui2cp2k architecture and data flow" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <marker id="arrow" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
-      <path d="M0,0 L6,3 L0,6 Z" fill="#94a3b8"/>
-    </marker>
-    <style>
-      .band  { fill:#64748b; font:600 12px ui-sans-serif,system-ui,sans-serif; letter-spacing:.08em; text-transform:uppercase; }
-      .box   { fill:#ffffff; stroke:#c7d2e6; stroke-width:1.4; }
-      .boxh  { fill:#eaf1fb; stroke:#1f6feb; stroke-width:1.5; }
-      .core  { fill:#f8fafc; stroke:#cbd5e1; stroke-width:1.5; }
-      .step  { fill:#ffffff; stroke:#d6def0; stroke-width:1.2; }
-      .out   { fill:#ecfdf5; stroke:#10b981; stroke-width:1.5; }
-      .t     { fill:#0f172a; font:500 13px ui-sans-serif,system-ui,sans-serif; text-anchor:middle; }
-      .ts    { fill:#334155; font:500 12px ui-sans-serif,system-ui,sans-serif; text-anchor:middle; }
-      .tsub  { fill:#64748b; font:400 11px ui-sans-serif,system-ui,sans-serif; text-anchor:middle; }
-      .flow  { stroke:#94a3b8; stroke-width:1.6; fill:none; }
-    </style>
-  </defs>
-
-  <!-- INPUTS -->
-  <text class="band" x="20" y="22">Inputs · CHARMM-GUI / AMBER</text>
-  <rect class="box" x="20"  y="32" width="220" height="46" rx="8"/>
-  <rect class="box" x="270" y="32" width="220" height="46" rx="8"/>
-  <rect class="box" x="520" y="32" width="220" height="46" rx="8"/>
-  <text class="t"  x="130" y="52">topology</text><text class="tsub" x="130" y="68">step3_input.parm7</text>
-  <text class="t"  x="380" y="52">coordinates</text><text class="tsub" x="380" y="68">step3_input.rst7</text>
-  <text class="t"  x="630" y="52">QM region</text><text class="tsub" x="630" y="68">step5_production.mdin</text>
-
-  <path class="flow" d="M380,80 L380,108" marker-end="url(#arrow)"/>
-
-  <!-- FRONTENDS -->
-  <text class="band" x="20" y="128">Frontends · one shared core</text>
-  <rect class="boxh" x="20"  y="138" width="220" height="42" rx="8"/>
-  <rect class="boxh" x="270" y="138" width="220" height="42" rx="8"/>
-  <rect class="boxh" x="520" y="138" width="220" height="42" rx="8"/>
-  <text class="ts" x="130" y="164">CLI wizard</text>
-  <text class="ts" x="380" y="164">Textual TUI workbench</text>
-  <text class="ts" x="630" y="164">Non-interactive batch</text>
-
-  <path class="flow" d="M380,180 L380,206" marker-end="url(#arrow)"/>
-
-  <!-- CORE -->
-  <rect class="core" x="20" y="214" width="720" height="300" rx="12"/>
-  <text class="band" x="36" y="238">Validated scientific core</text>
-  <g>
-    <rect class="step" x="40"  y="250" width="330" height="40" rx="7"/>
-    <rect class="step" x="390" y="250" width="330" height="40" rx="7"/>
-    <rect class="step" x="40"  y="300" width="330" height="40" rx="7"/>
-    <rect class="step" x="390" y="300" width="330" height="40" rx="7"/>
-    <rect class="step" x="40"  y="350" width="330" height="40" rx="7"/>
-    <rect class="step" x="390" y="350" width="330" height="40" rx="7"/>
-    <text class="ts" x="205" y="275">1 · Topology validation</text>
-    <text class="ts" x="555" y="275">2 · QM region + link atoms</text>
-    <text class="ts" x="205" y="325">3 · Boundary charge redistribution</text>
-    <text class="ts" x="555" y="325">4 · Electronic structure + spin risk</text>
-    <text class="ts" x="205" y="375">5 · CP2K capability gating</text>
-    <text class="ts" x="555" y="375">6 · Input assembly</text>
-    <rect class="step" x="40" y="420" width="680" height="78" rx="7" style="fill:#fbfcfe;"/>
-    <text class="band" x="56" y="442" style="fill:#94a3b8;">Safeguards throughout</text>
-    <text class="tsub" x="380" y="466">forbidden-cut rejection · cross-channel charge conservation · link-geometry checks</text>
-    <text class="tsub" x="380" y="484">multiplicity-parity enforcement · version + data-file gating · --strict gate</text>
-  </g>
-
-  <path class="flow" d="M380,514 L380,540" marker-end="url(#arrow)"/>
-
-  <!-- OUTPUTS -->
-  <text class="band" x="20" y="560">Outputs</text>
-  <rect class="out" x="20"  y="570" width="350" height="64" rx="8"/>
-  <rect class="out" x="390" y="570" width="350" height="64" rx="8"/>
-  <text class="ts" x="195" y="596">CP2K QM/MM inputs</text><text class="tsub" x="195" y="616">embedded provenance header</text>
-  <text class="ts" x="565" y="596">Audit artifacts</text><text class="tsub" x="565" y="616">boundary_charges · electronic_state · provenance</text>
-</svg>
-"""
-
-
 def build():
-    fig2 = data_uri(os.path.join(FIG, "fig2_tui_workbench.svg"), "image/svg+xml")
-    fig3 = data_uri(os.path.join(FIG, "fig3_nve_conservation.png"), "image/png")
-    fig4 = data_uri(os.path.join(FIG, "fig4_boundary_scheme.png"), "image/png")
+    # All three figures are embedded as isolated SVG data-URIs (vector; the TUI
+    # screenshot is a raster embedded inside its SVG). Isolation via <img>
+    # avoids any id/style collisions between the matplotlib and hand-authored SVGs.
+    fig1 = data_uri(os.path.join(FIG, "fig1_architecture.svg"), "image/svg+xml")
+    fig2 = data_uri(os.path.join(FIG, "fig2_tui.svg"), "image/svg+xml")
+    fig3 = data_uri(os.path.join(FIG, "fig3_validation.svg"), "image/svg+xml")
     today = datetime.date.today().isoformat()
 
-    # Plain replacement (not str.format) because the CSS / SVG contain literal
-    # braces that would break format-string parsing.
+    # Plain replacement (not str.format) because the CSS contains literal braces.
     html = TEMPLATE
-    for key, val in (("{fig1_svg}", FIG1_SVG), ("{fig2}", fig2),
-                     ("{fig3}", fig3), ("{fig4}", fig4), ("{today}", today)):
+    for key, val in (("{fig1}", fig1), ("{fig2}", fig2),
+                     ("{fig3}", fig3), ("{today}", today)):
         html = html.replace(key, val)
     out = os.path.join(HERE, "manuscript.html")
     with open(out, "w", encoding="utf-8") as fh:
@@ -300,8 +225,8 @@ TEMPLATE = """<!DOCTYPE html>
     Interfacer is web-based, semiempirical-only, and targets the CHARMM/AMBER engines, not CP2K;
     ASH is a scripting library rather than a guided wizard; MiMiCPy targets CPMD+GROMACS.
     <strong>charmmgui2cp2k</strong> fills this gap and is delivered as an offline, terminal-native
-    wizard aimed at enzyme active sites, metalloproteins, and redox cofactors &mdash; the systems
-    where boundary and charge correctness matter most.</p>
+    wizard aimed at enzyme active sites, flavoenzymes, metalloproteins, and other redox-cofactor systems
+    &mdash; where boundary and charge correctness matter most.</p>
 
     <div class="tbl-wrap">
     <table class="bt">
@@ -349,7 +274,7 @@ TEMPLATE = """<!DOCTYPE html>
     reproducible pipelines.</p>
 
     <figure class="arch">
-      <div class="frame">{fig1_svg}</div>
+      <div class="frame"><img src="{fig1}" alt="charmmgui2cp2k architecture and data flow"/></div>
       <figcaption><span class="lab">Figure 1.</span> Architecture and data flow. Three frontends
       share one validated scientific core that ingests CHARMM-GUI/AMBER inputs, applies six
       sequential stages under cross-cutting safeguards, and emits runnable CP2K QM/MM input plus
@@ -357,16 +282,18 @@ TEMPLATE = """<!DOCTYPE html>
     </figure>
 
     <figure>
-      <div class="frame"><img src="{fig2}" alt="Textual TUI workbench screenshot"/></div>
+      <div class="frame"><img src="{fig2}" alt="Annotated Textual TUI workbench screenshot"/></div>
       <figcaption><span class="lab">Figure 2.</span> The Textual TUI workbench (rendered live,
-      headlessly) on the System phase: a persistent phase rail, sticky system summary, validation
-      tray, and keyboard-first navigation make the next safe action obvious without a manual.</figcaption>
+      headlessly) on the System phase. Callouts: <strong>(1)</strong> the phase rail showing current
+      and remaining steps; <strong>(2)</strong> the sticky system summary; <strong>(3)</strong>
+      auto-detected inputs, each with its provenance; <strong>(4)</strong> progressive disclosure of
+      expert detail. Keyboard-first navigation makes the next safe action obvious without a manual.</figcaption>
     </figure>
 
     <h2><span class="n">3</span>Validation</h2>
     <p>All validation is reproducible from the <code>validation/</code> harness on a committed
     alanine-dipeptide demo system (build script included); production-scale agreement is the
-    metalloprotein case study (&sect;3.4).</p>
+    flavoenzyme case study (&sect;3.4).</p>
 
     <h3>3.1&nbsp;&nbsp;Real-CP2K acceptance</h3>
     <p>Every generated staged input passes a real CP2K binary&rsquo;s parser-only
@@ -377,40 +304,36 @@ TEMPLATE = """<!DOCTYPE html>
     <p>A self-contained NVE QM/MM trajectory of the generated setup (PBE, 50&nbsp;fs) gives a
     conserved-quantity range of 0.104&nbsp;kcal/mol and a drift of
     <strong>2.6&times;10<sup>&minus;4</sup>&nbsp;kT/dof/ps</strong> with no systematic trend
-    (Figure&nbsp;3), demonstrating the link atoms, deleted boundary terms, and boundary charges
+    (Figure&nbsp;3a), demonstrating the link atoms, deleted boundary terms, and boundary charges
     are mutually consistent. A longer trajectory with tighter SCF tolerance reduces this toward
     the literature reference (10<sup>&minus;5</sup>&ndash;10<sup>&minus;6</sup>&nbsp;kT/dof/ps;
     G&ouml;tz <em>et al.</em>, 2014 [6]).</p>
-
-    <figure>
-      <div class="frame"><img src="{fig3}" alt="NVE energy-conservation trace"/></div>
-      <figcaption><span class="lab">Figure 3.</span> NVE energy conservation of the
-      tool-generated QM/MM setup (alanine-dipeptide demo, PBE, 50&nbsp;fs). The conserved quantity
-      oscillates within ~0.1&nbsp;kcal/mol and the transient <em>decays</em> &mdash; bounded, with
-      no systematic drift.</figcaption>
-    </figure>
 
     <h3>3.3&nbsp;&nbsp;Boundary handling and reproducibility</h3>
     <p>Single-point energies under the NONE&nbsp;/&nbsp;Z1&nbsp;/&nbsp;CHARGE_SHIFT boundary
     schemes differ measurably: NONE (the full M1 frontier charge retained in the embedding) lies
     2.61&nbsp;kcal/mol from CHARGE_SHIFT, while Z1 and CHARGE_SHIFT (both remove M1 from the
-    embedding) agree to 0.26&nbsp;kcal/mol (Figure&nbsp;4). This confirms the boundary charge
+    embedding) agree to 0.26&nbsp;kcal/mol (Figure&nbsp;3b). This confirms the boundary charge
     treatment is physically active and that the redistribution schemes control the frontier
     over-polarization NONE exhibits. Repeated runs are bitwise reproducible
     (|&Delta;E|&nbsp;=&nbsp;5&times;10<sup>&minus;15</sup>&nbsp;Ha). Element identities and charges
     agree with an independent ParmEd parse (<code>tests/unit/test_parmed_crosscheck.py</code>).</p>
 
     <figure>
-      <div class="frame"><img src="{fig4}" alt="Boundary-scheme over-polarization bar chart"/></div>
-      <figcaption><span class="lab">Figure 4.</span> Boundary-scheme over-polarization. Single-point
-      QM/MM energy relative to CHARGE_SHIFT: NONE (full M1 charge in the embedding) is an outlier
-      by +2.61&nbsp;kcal/mol, while Z1 and CHARGE_SHIFT &mdash; which both remove M1 from the
-      embedding &mdash; agree to within 0.26&nbsp;kcal/mol.</figcaption>
+      <div class="frame"><img src="{fig3}" alt="Validation: NVE energy conservation and boundary-scheme over-polarization"/></div>
+      <figcaption><span class="lab">Figure 3.</span> Validation on the alanine-dipeptide demo
+      (PBE; CP2K&nbsp;2025.2). <strong>(a)</strong> NVE energy conservation &mdash; the conserved
+      quantity oscillates within ~0.1&nbsp;kcal/mol and the transient decays; bounded, with no
+      systematic drift (2.6&times;10<sup>&minus;4</sup>&nbsp;kT/dof/ps). <strong>(b)</strong>
+      Boundary-scheme over-polarization &mdash; single-point QM/MM energy relative to CHARGE_SHIFT:
+      NONE (full M1 charge in the embedding) is an outlier by +2.61&nbsp;kcal/mol, while Z1 and
+      CHARGE_SHIFT (both remove M1 from the embedding) agree to within 0.26&nbsp;kcal/mol.</figcaption>
     </figure>
 
-    <h3>3.4&nbsp;&nbsp;Metalloprotein case study <span class="tag">data pending</span></h3>
-    <p>Headline validation on a metal-containing active site (L-amino-acid oxidase, LAAO), where
-    boundary/charge correctness is most scrutinized: single-point and short-MD agreement against a
+    <h3>3.4&nbsp;&nbsp;Flavoenzyme case study <span class="tag">data pending</span></h3>
+    <p>Headline validation on a flavoenzyme active site (L-amino-acid oxidase, LAAO; a redox-active FAD
+    cofactor), where the QM region spans the flavin and substrate and both boundary/charge handling
+    and spin-state assignment are most scrutinized: single-point and short-MD agreement against a
     reference, plus a boundary over-polarization probe. The harness runs unchanged via
     <code>--dir</code>; results will be inserted here.</p>
 
