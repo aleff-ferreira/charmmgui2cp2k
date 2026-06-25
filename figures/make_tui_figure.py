@@ -42,9 +42,10 @@ def main():
     h, w = img.shape[0], img.shape[1]
     asp = h / w
     fig_w = 7.0
-    fig = plt.figure(figsize=(fig_w, fig_w * asp + 0.95))
-    # screenshot axes (top) + legend axes (bottom)
-    ax = fig.add_axes([0.012, 0.20, 0.976, 0.79])
+    # Screenshot + numbered badges only; the callouts are explained in the
+    # figure caption (no in-figure legend strip).
+    fig = plt.figure(figsize=(fig_w, fig_w * asp))
+    ax = fig.add_axes([0.006, 0.006, 0.988, 0.988])
     ax.imshow(img)
     ax.set_xlim(0, w); ax.set_ylim(h, 0)
     ax.axis("off")
@@ -61,18 +62,6 @@ def main():
         ax.add_patch(Circle((cx, cy), r, fc=P["accent"], ec="white", lw=1.2, zorder=6))
         ax.text(cx, cy, num, color="white", fontsize=10, fontweight="bold",
                 ha="center", va="center", zorder=7)
-
-    # legend strip
-    lax = fig.add_axes([0.012, 0.0, 0.976, 0.18]); lax.axis("off")
-    lax.set_xlim(0, 1); lax.set_ylim(0, 1)
-    ys = [0.78, 0.54, 0.30, 0.06]
-    for (_, _, num, label), yy in zip(CALLOUTS, ys):
-        lax.add_patch(Circle((0.022, yy + 0.03), 0.013, transform=lax.transAxes,
-                             fc=P["accent"], ec="none"))
-        lax.text(0.022, yy + 0.03, num, color="white", fontsize=8, fontweight="bold",
-                 ha="center", va="center", transform=lax.transAxes)
-        lax.text(0.05, yy + 0.03, label, color=P["ink"], fontsize=9,
-                 ha="left", va="center", transform=lax.transAxes)
 
     paths = _style.save_all(fig, "fig2_tui")
     plt.close(fig)
