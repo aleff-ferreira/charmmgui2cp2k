@@ -22,7 +22,7 @@ analysis, and CP2K version/data-file capability gating). To our knowledge it is
 the first automated CHARMM-GUI/AMBER → CP2K QM/MM input generator. We validate
 correctness by NVE energy conservation, real-CP2K parser acceptance, and an
 independent ParmEd cross-check, and show the generated boundary is energy-
-conserving. The tool is open source (MIT) at TODO_URL.
+conserving. The tool is open source (MIT) at https://github.com/aleff-ferreira/charmmgui2cp2k.
 
 ## 1 Statement of need
 
@@ -136,7 +136,7 @@ tests; releases will be archived on Zenodo for a versioned DOI.
 
 ## 5 Availability
 
-Source code, tests, and the validation harness: TODO_URL (MIT license). Tested on
+Source code, tests, and the validation harness: https://github.com/aleff-ferreira/charmmgui2cp2k (MIT license). Tested on
 Linux with Python 3.10–3.12 and CP2K ≥ 7.1.
 
 ## Figures

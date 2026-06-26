@@ -352,7 +352,7 @@ TEMPLATE = """<!DOCTYPE html>
 
     <h2 id="avail"><span class="n">5</span>Availability</h2>
     <p>Source code, tests, and the validation harness are available under the MIT license at
-    [ repository URL &mdash; on publication ], archived on Zenodo for a versioned DOI. Tested on
+    <a href="https://github.com/aleff-ferreira/charmmgui2cp2k">https://github.com/aleff-ferreira/charmmgui2cp2k</a>, archived on Zenodo for a versioned DOI. Tested on
     Linux with Python&nbsp;3.10&ndash;3.12 and CP2K&nbsp;&ge;&nbsp;7.1.</p>
 
     <h2>References</h2>

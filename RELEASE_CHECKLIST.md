@@ -4,11 +4,12 @@ Steps to take the local repository to a citeable public release, in dependency
 order. Items marked **[user]** require decisions/credentials only the maintainer
 has; the rest are mechanical.
 
-## 1. Identity & metadata **[user]**
-- [ ] Fill author identity: `LICENSE` (copyright holder), `CITATION.cff`
-      (given-names/family-names/affiliation/ORCID), `paper/manuscript.md` authors.
-- [ ] Replace `REPLACE_ME` / `TODO_URL` repository URLs in `README.md` and
-      `CITATION.cff` with the real GitHub URL.
+## 1. Identity & metadata
+- [x] Repository URLs filled (`README.md`, `CITATION.cff`, `paper/manuscript.*`):
+      https://github.com/aleff-ferreira/charmmgui2cp2k
+- [x] Primary author/copyright: Aleff Ferreira (`LICENSE`, `CITATION.cff`).
+- [ ] **[user]** Add affiliation + ORCID in `CITATION.cff`, and any co-authors /
+      affiliations in `paper/manuscript.md`.
 
 ## 2. Internal scaffolding — DONE (moved to docs/dev/)
 The autonomous-agent working material has been moved out of the public top level

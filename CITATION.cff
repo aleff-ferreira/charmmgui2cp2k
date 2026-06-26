@@ -9,10 +9,11 @@ abstract: >-
   version-capability gating.
 type: software
 authors:
-  - name: "The charmmgui2cp2k authors"
-    # TODO: replace with given-names / family-names / affiliation / ORCID
+  - given-names: Aleff
+    family-names: Ferreira
+    # TODO: add affiliation and ORCID
 license: MIT
-repository-code: "https://github.com/REPLACE_ME/charmmgui2cp2k"
+repository-code: "https://github.com/aleff-ferreira/charmmgui2cp2k"
 keywords:
   - QM/MM
   - CP2K

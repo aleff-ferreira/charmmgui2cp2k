@@ -52,7 +52,7 @@ The wizard runs from a single script. The launcher builds an isolated Conda
 environment (Python 3.10 + Textual) on first use:
 
 ```bash
-git clone https://github.com/REPLACE_ME/charmmgui2cp2k.git
+git clone https://github.com/aleff-ferreira/charmmgui2cp2k.git
 cd charmmgui2cp2k
 ./tui install     # create/repair the local .conda-tui environment
 ```
