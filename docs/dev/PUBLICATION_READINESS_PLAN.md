@@ -147,10 +147,13 @@ a `validation/` directory and a reproducible study:
 - **A4.4 Standard benchmark suite.** Run the BioExcel GROMACS+CP2K QM/MM benchmark
   systems (MQAE, ClC, CBD_PHY, GFP) and/or validate against CP2K's GEEP embedding
   (Laino 2005) to show tool-generated input agrees with CP2K-standalone references.
-- **A4.5 Metalloprotein/active-site case study.** Because the tool targets
-  metalloproteins and redox cofactors — exactly where boundary/charge correctness
-  is most scrutinized — include at least one metal-containing active-site case as
-  the headline validation. (The bundled LAAO system is a candidate.)
+- **A4.5 Flavoenzyme / redox-cofactor active-site case study.** Because the tool
+  targets enzyme active sites, flavoenzymes, metalloproteins, and other
+  redox-cofactor systems — exactly where boundary/charge and spin correctness are
+  most scrutinized — include at least one redox-cofactor active-site case as the
+  headline validation. The chosen system is LAAO (L-amino-acid oxidase), an
+  FAD-dependent flavoenzyme (not a metalloprotein); its QM region spans the flavin
+  and substrate.
 
 > Note: exact literature drift/agreement figures cited here are from
 > abstracts/secondary sources; re-confirm against the primary DOIs before quoting
@@ -216,8 +219,8 @@ remaining gap and makes the claim defensible.
   core) → Scientific safeguards (charge conservation, link atoms, spin risk,
   version gating) → Validation results (Track A4) → Usability/FAIR → Availability.
   Reuse the `prompt_kit_tui` design brief language for the usability section.
-- **C5. Figures.** (1) workflow/architecture diagram; (2) TUI screenshot walking a
-  metalloprotein setup; (3) NVE energy-conservation plot; (4) boundary-scheme
+- **C5. Figures.** (1) workflow/architecture diagram; (2) TUI screenshot walking an
+  active-site QM/MM setup; (3) NVE energy-conservation plot; (4) boundary-scheme
   over-polarization probe; (5) cross-code agreement table.
 - **C6. Reproducibility capsule.** Code Ocean / container image reproducing the
   validation figures end-to-end (Bioinformatics encourages; reviewers test it).

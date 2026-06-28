@@ -41,3 +41,6 @@ leap.log
 validation/results/nve_workdir/
 validation/results/sp_workdir/
 validation/_fixture_gen/
+
+# ── Manuscript kept local only (not published in the repo) ───────────────
+paper/
