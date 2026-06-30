@@ -43,8 +43,14 @@ into `docs/dev/` (reversible; `git rm -r docs/dev/` for total removal):
       case study (§3.4) and BioExcel benchmark results (§3.5), and figures
       (architecture diagram, TUI screenshot, NVE plot, boundary-scheme probe,
       cross-code table).
-- [ ] Confirm venue (email the *Briefings in Bioinformatics* editor if still
-      considered; otherwise submit to *Bioinformatics*/*JCIM* Application Note).
+- [ ] **Venue: *Journal of Chemical Information and Modeling* (JCIM), Application
+      Note** (best scope/audience fit — JCIM scope explicitly covers QM/MM; the
+      closest competitor, MiMiCPy, published there). Open-access alternative if
+      required by funder: *Journal of Cheminformatics*.
+- [ ] Meet JCIM Application Note format: ≤ 6 journal pages (~5000 words), ≥ 1
+      figure, ACS reference style; software free and available ≥ 2 years (stated
+      in §5). Current draft ≈ 1530 words — within limit.
+- [ ] Prepare the ACS **TOC / abstract graphic** (required for JCIM submission).
 - [ ] Prepare the parallel JOSS submission (statement of need, state of the
       field, automated tests + CI — all already in place).
 
