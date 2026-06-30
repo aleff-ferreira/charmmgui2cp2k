@@ -3229,16 +3229,22 @@ def detect_link_bonds(topo, qm_indices_set, atom_types=None, element_map=None, a
     """
     bonds_h = topo.get_int_array('BONDS_INC_HYDROGEN')
     bonds_a = topo.get_int_array('BONDS_WITHOUT_HYDROGEN')
+    # Audit fix H1/C4: the bond-type index (third value of each AMBER bond
+    # triplet) indexes BOND_EQUIL_VALUE — the force-field equilibrium length,
+    # which is the only available signal for chemical bond order in a prmtop.
+    bond_equil = topo.get_float_array('BOND_EQUIL_VALUE') or []
 
     links = []
     seen = set()
     unknown_alpha_pairs = set()
+    nonsingle_cuts = []
 
     for bond_arr in [bonds_h, bonds_a]:
         # AMBER bonds: (i/3, j/3, type) triplets with coordinate indices
         for k in range(0, len(bond_arr) - 2, 3):
             a1 = bond_arr[k] // 3 + 1     # 1-based
             a2 = bond_arr[k+1] // 3 + 1   # 1-based
+            btype = bond_arr[k+2]         # 1-based bond-type index (FF params)
 
             in_qm_1 = a1 in qm_indices_set
             in_qm_2 = a2 in qm_indices_set
@@ -3254,19 +3260,38 @@ def detect_link_bonds(topo, qm_indices_set, atom_types=None, element_map=None, a
                     alpha = _alpha_imomm_for_pair(qm_elem, mm_elem)
                     if alpha == DEFAULT_ALPHA_IMOMM and (qm_elem, mm_elem) not in LINK_ALPHA_IMOMM_BY_PAIR and (mm_elem, qm_elem) not in LINK_ALPHA_IMOMM_BY_PAIR:
                         unknown_alpha_pairs.add((qm_elem, mm_elem))
-                    links.append({
+                    # Force-field equilibrium length for this bond, then the
+                    # inferred bond order (single vs aromatic/double/triple).
+                    ff_req = None
+                    if 1 <= int(btype) <= len(bond_equil):
+                        ff_req = float(bond_equil[int(btype) - 1])
+                    order = classify_link_bond_order(qm_elem, mm_elem, ff_req)
+                    link = {
                         'QM_INDEX': qm_atom,
                         'MM_INDEX': mm_atom,
                         'QM_ELEM': qm_elem,
                         'MM_ELEM': mm_elem,
                         'ALPHA_IMOMM': alpha,
-                    })
+                        'FF_BOND_TYPE_INDEX': int(btype),
+                        'FF_EQUIL_LENGTH': ff_req,
+                        'BOND_ORDER_CLASS': order['class'],
+                        'BOND_ORDER_RATIO': order['ratio'],
+                    }
+                    links.append(link)
+                    if not order['is_single'] and order['class'] != 'unknown':
+                        nonsingle_cuts.append(link)
 
     if unknown_alpha_pairs:
         pairs = ", ".join(f"{a}-{b}" for a, b in sorted(unknown_alpha_pairs))
         warn(
             f"Using default ALPHA_IMOMM={DEFAULT_ALPHA_IMOMM:.2f} for unsupported boundary pairs: {pairs}"
         )
+
+    # Audit fix C4/H1: never silently cap a non-single bond with an IMOMM
+    # hydrogen — surface it loudly (the strict gate / boundary audit also carry
+    # the recorded BOND_ORDER_CLASS).
+    for msg in nonsingle_link_cut_messages(nonsingle_cuts):
+        warn(msg)
 
     return links
 
@@ -3336,10 +3361,28 @@ COVALENT_RADII_ANG = {
     'K': 2.03, 'CA': 1.76, 'MN': 1.39, 'FE': 1.32, 'CO': 1.26,
     'NI': 1.24, 'CU': 1.32, 'ZN': 1.22, 'SE': 1.20, 'BR': 1.20, 'I': 1.39,
 }
-# Fractional tolerance on the expected covalent bond length before a link is
-# flagged.  ±40% is permissive enough not to fire on normal force-field bond
-# stretching yet still catches clashes (<~0.5x) and non-bonds (>~1.5x).
-LINK_GEOMETRY_TOLERANCE_FRAC = 0.40
+# Fractional tolerance on the expected single-bond covalent length before a link
+# is flagged on GEOMETRY (audit fix C4 + L2).  Tightened from the old ±40% — a
+# window of [0.92x, 1.40x] of a C-C single bond (1.40 - 2.16 Å) silently
+# accepted double (1.34 Å), aromatic (1.40 Å) and triple (1.20 Å) bonds as
+# "ok".  ±15% ([1.29, 1.75] Å for C-C) still tolerates normal force-field
+# stretching in a single snapshot while catching clashes and broken/non-bonds.
+# Geometry alone cannot separate a double bond from a stretched single bond,
+# so chemical bond order is detected separately from the force-field
+# equilibrium length (see classify_link_bond_order); the two checks are
+# complementary.
+LINK_GEOMETRY_TOLERANCE_FRAC = 0.15
+
+# Bond-order classification thresholds (audit fix C4/H1).  AMBER prmtops store
+# no chemical bond order, but BOND_EQUIL_VALUE (the force-field equilibrium
+# length) encodes bond character: aromatic/peptide/double/triple bonds are
+# markedly shorter than the single-bond covalent reference (sum of Cordero 2008
+# radii).  A cut is treated as single only when its FF equilibrium length is at
+# least this fraction of that reference; below LINK_BOND_ORDER_MULTIPLE_MAX_RATIO
+# it is a clear double/triple bond.  IMOMM hydrogen capping is only valid for
+# single-bond cuts (Maseras & Morokuma, J. Comput. Chem. 16, 1170 (1995)).
+LINK_BOND_ORDER_SINGLE_MIN_RATIO = 0.94
+LINK_BOND_ORDER_MULTIPLE_MAX_RATIO = 0.86
 
 
 def expected_covalent_bond_length(elem_a, elem_b):
@@ -3349,6 +3392,73 @@ def expected_covalent_bond_length(elem_a, elem_b):
     if ra is None or rb is None:
         return None
     return ra + rb
+
+
+def classify_link_bond_order(qm_elem, mm_elem, ff_equil_length):
+    """Infer the chemical order of a QM/MM cut bond (audit fix C4/H1).
+
+    AMBER stores no bond order, but the force-field equilibrium length
+    (``BOND_EQUIL_VALUE`` for the bond's type index) encodes bond character:
+    aromatic/peptide/double/triple bonds sit well below the single-bond
+    covalent reference.  IMOMM hydrogen capping is only physically valid for a
+    *single*-bond cut — capping a severed double/aromatic/peptide bond with a
+    single-bond hydrogen mismatches the QM/MM Hamiltonian and the embedding
+    field.
+
+    Returns a dict::
+
+        {'class': 'single'|'elevated'|'multiple'|'unknown',
+         'ratio': <ff_equil / single_ref> | None,
+         'single_ref_A': float | None,
+         'ff_equil_A': float | None,
+         'is_single': bool}
+
+    ``is_single`` is True for 'single' and (conservatively) for 'unknown', so a
+    missing equilibrium length or radius never raises a false alarm.
+    """
+    single_ref = expected_covalent_bond_length(qm_elem, mm_elem)
+    if ff_equil_length is None or single_ref is None or single_ref <= 0:
+        return {'class': 'unknown', 'ratio': None, 'single_ref_A': single_ref,
+                'ff_equil_A': (float(ff_equil_length)
+                               if ff_equil_length is not None else None),
+                'is_single': True}
+    ratio = float(ff_equil_length) / float(single_ref)
+    if ratio >= LINK_BOND_ORDER_SINGLE_MIN_RATIO:
+        cls = 'single'
+    elif ratio >= LINK_BOND_ORDER_MULTIPLE_MAX_RATIO:
+        cls = 'elevated'   # aromatic / peptide / partial double character
+    else:
+        cls = 'multiple'   # double / triple
+    return {'class': cls, 'ratio': ratio, 'single_ref_A': float(single_ref),
+            'ff_equil_A': float(ff_equil_length), 'is_single': cls == 'single'}
+
+
+def nonsingle_link_cut_messages(links):
+    """Human-readable warning per QM/MM cut that is not a clean single bond
+    (audit fix C4/H1).  Reads ``BOND_ORDER_CLASS``/``FF_EQUIL_LENGTH`` recorded
+    on each link by ``detect_link_bonds``.  Accepts both link-dict key
+    conventions for elements/indices.
+    """
+    messages = []
+    for lnk in (links or []):
+        cls = lnk.get('BOND_ORDER_CLASS')
+        if cls not in ('elevated', 'multiple'):
+            continue
+        qm_e = lnk.get('QM_ELEM') or lnk.get('QM_ELEMENT')
+        mm_e = lnk.get('MM_ELEM') or lnk.get('MM_ELEMENT')
+        qi = lnk.get('QM_INDEX') or lnk.get('QM_ATOM_INDEX') or '?'
+        mi = lnk.get('MM_INDEX') or lnk.get('MM_ATOM_INDEX') or '?'
+        req = lnk.get('FF_EQUIL_LENGTH')
+        kind = ('a double/triple bond' if cls == 'multiple'
+                else 'an aromatic/peptide/partial-double bond')
+        req_txt = f"{req:.3f} Å" if isinstance(req, (int, float)) else "n/a"
+        messages.append(
+            f"Non-single QM/MM cut: QM {qm_e}{qi} — MM {mm_e}{mi} looks like "
+            f"{kind} (force-field equilibrium {req_txt}). IMOMM hydrogen capping "
+            f"is only valid for single bonds; enclose the full conjugated/aromatic "
+            f"group in the QM region or move the cut to an adjacent single bond."
+        )
+    return messages
 
 
 def verify_link_geometry(links, coords, tolerance_frac=LINK_GEOMETRY_TOLERANCE_FRAC):
