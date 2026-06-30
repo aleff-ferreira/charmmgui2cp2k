@@ -6,6 +6,14 @@
 **Tally (verified machine totals):** 43 findings raised, 6 refuted, **37 confirmed** — 5 Critical (C1–C5), 13 High (H1–H13), 16 Medium (M1–M16), 3 Low (L1–L3). *(An earlier draft header said "40/46"; the enumerated findings below total 37, matching the run's machine totals.)*
 
 > **Maintainer verification (2026-06-29):** C1, C2, C4, C5, and H1 were independently spot-checked against the source and all hold (e.g. `LINK_GEOMETRY_TOLERANCE_FRAC = 0.40` at line 3314; `BoundaryPhase.validate` returns `True, []` with no forbidden-link check; the bond loop strides `range(0, len-2, 3)` and never reads the `[k+2]` bond-type index). Line numbers are approximate and may drift; confirm before editing.
+>
+> **P0 remediation status (2026-06-30, branch `fix/p0-scientific-rigor`):** all P0 items are **FIXED & test-backed** (176 tests pass, +60 new):
+> - **C1, H8** — DFTD4 version-gated on every selection path (`validate_dispersion_scheme_version`). _commit 8d1b2d8_
+> - **C5, H9, M1** — out-of-range QM indices and sub-physical RCUT now hard-fail. _commit 547c18d_
+> - **C2, C3, H12** — TUI now enforces forbidden-link, ADMM-coverage and MD-range gates via shared helpers. _commit 0e4d365_
+> - **C4, H1, L2** — bond order inferred from `BOND_EQUIL_VALUE`; non-single cuts warned; geometry tolerance 0.40→0.15. _commit a3cb557_
+>
+> P1/P2/P3 items (warn→gate routing for spin/parity/duplicate-M1; peptide/aromatic α; charge-conservation totals; CP2K `--check` golden test; metal-at-boundary fixture) remain open.
 
 ---
 
