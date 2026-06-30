@@ -4120,6 +4120,11 @@ _FUNCTIONAL_DFTD3_PARAMETER_AVAILABLE = {
 # DFTD3 instead" to stay safe.
 CP2K_DFTD4_MIN_VERSION = (8, 1)
 
+# Canonical keyword path for the DFTD4 dispersion TYPE; used both as a
+# CP2K_KEYWORD_MIN_VERSION entry (for capability reporting / coherence) and
+# in the generation-time version guard, so the two never drift.
+CP2K_DFTD4_TYPE_KEYWORD = '&FORCE_EVAL/&DFT/&XC/&VDW_POTENTIAL/&PAIR_POTENTIAL/TYPE (DFTD4)'
+
 _FUNCTIONAL_DFTD4_PARAMETER_AVAILABLE = {
     # Common GGAs
     'PBE':        True,
@@ -4280,6 +4285,48 @@ def _validate_dispersion_scheme(scheme):
             f"Allowed: {', '.join(DISPERSION_SCHEMES)}"
         )
     return key
+
+
+def validate_dispersion_scheme_version(scheme, cp2k_version_tuple,
+                                       source='configuration'):
+    """Hard-gate DFTD4 against the minimum CP2K version (audit fix C1).
+
+    DFTD4 requires the s-dftd4 library linked into CP2K >= 8.1
+    (``CP2K_DFTD4_MIN_VERSION``).  Selecting it on an older build produces
+    input that aborts at CP2K parse time ("DFTD4 not available") only after
+    queue wait and wasted allocation.  The interactive upgrade path
+    (``recommend_dftd4_upgrade``) already checks the version, but the
+    ``--dispersion-scheme DFTD4`` CLI override previously bypassed every
+    version check; this guard closes that hole regardless of how DFTD4 was
+    selected.
+
+    Behaviour:
+      * resolved version known and below the floor -> ``ValueError``;
+      * version unknown (no CP2K probed and no ``--cp2k-min-version``)
+        -> loud warning only, because legitimate offline preparation may
+        target a newer cluster build than the local machine.
+
+    ``scheme`` is matched case-insensitively; non-DFTD4 schemes are no-ops.
+    """
+    if str(scheme or '').upper() != 'DFTD4':
+        return
+    floor = format_cp2k_version(CP2K_DFTD4_MIN_VERSION)
+    if cp2k_version_tuple is None:
+        warn(
+            f"DFTD4 dispersion selected ({source}) but the target CP2K version "
+            f"could not be verified. DFTD4 requires CP2K >= {floor}; ensure the "
+            f"run host provides it, or pass --cp2k-min-version, or use "
+            f"--dispersion-scheme DFTD3_BJ. Input will fail at parse time on "
+            f"builds older than {floor}."
+        )
+        return
+    if not cp2k_version_at_least(cp2k_version_tuple, CP2K_DFTD4_MIN_VERSION):
+        raise ValueError(
+            f"DFTD4 dispersion ({source}) requires CP2K >= {floor}, but the "
+            f"resolved CP2K version is {format_cp2k_version(cp2k_version_tuple)}. "
+            f"Use --dispersion-scheme DFTD3_BJ (universal) or run on "
+            f"CP2K >= {floor}."
+        )
 
 
 def validate_functional_dftd3_availability(functional, interactive=False,
@@ -6507,6 +6554,11 @@ CP2K_KEYWORD_MIN_VERSION = {
     # admm-dzp — newer curated auxiliary basis added in CP2K 8.1.
     # Ref: CP2K 8.1 release notes; BASIS_ADMM_MOLOPT header for 8.1+.
     'BASIS_ADMM_MOLOPT/admm-dzp': (8, 1),
+    # DFTD4 dispersion TYPE — needs the s-dftd4 library linked into CP2K,
+    # introduced in 8.1.  Ref: Caldeweyher et al., JCP 150, 154122 (2019);
+    # CP2K 8.1 release notes.  Kept in lock-step with CP2K_DFTD4_MIN_VERSION
+    # (consumed by recommend_dftd4_upgrade and validate_dispersion_scheme_version).
+    CP2K_DFTD4_TYPE_KEYWORD: CP2K_DFTD4_MIN_VERSION,
 }
 
 
@@ -6606,6 +6658,9 @@ def build_cp2k_capability(version_tuple, raw_version_line="",
 CP2K_OPTIONAL_ABOVE_HARD_FLOOR = frozenset({
     # admm-dzp is optional: V4 substitutes cpFIT3 when it is unavailable.
     'BASIS_ADMM_MOLOPT/admm-dzp',
+    # DFTD4 is optional: the universal DFTD3(BJ) scheme is the default and
+    # validate_dispersion_scheme_version refuses DFTD4 below its floor.
+    CP2K_DFTD4_TYPE_KEYWORD,
 })
 
 
@@ -20472,6 +20527,13 @@ def _main_cli_wizard():
         run_provenance=run_provenance,
     ):
         _dispersion_scheme_resolved = 'DFTD4'
+    # Audit fix C1: version-gate DFTD4 regardless of how it was selected
+    # (CLI override previously skipped every CP2K-version check).
+    validate_dispersion_scheme_version(
+        _dispersion_scheme_resolved,
+        (cp2k_capability.version if cp2k_capability else None),
+        source=('--dispersion-scheme' if dispersion_scheme_override else 'DFTD4 upgrade'),
+    )
     dft_config = make_dft_config(
         functional=functional,
         basis_set=basis_set,
