@@ -3001,11 +3001,19 @@ def extract_qm_from_mdin(
     return elements, indices, metadata
 
 
-def extract_qm_from_pdb(pdb_path):
+def extract_qm_from_pdb(pdb_path, topo=None):
     """
     Extract QM atom indices from PDB file.
     CHARMM-GUI marks QM atoms with specific residue names or segment IDs.
     Returns 1-based indices grouped by element.
+
+    Audit fix C5: when ``topo`` is supplied, PDB serials are validated against
+    the topology atom count (NATOM).  Out-of-range serials are dropped with a
+    warning, because otherwise they propagate three ways downstream — phantom
+    QM/MM links in ``detect_link_bonds``, invalid ``MM_INDEX`` in ``&QM_KIND``
+    (a CP2K runtime failure), and ``'X'`` element fallbacks that corrupt the
+    electron count and the spin decision.  An out-of-range serial means the PDB
+    does not match the topology, so the QM selection itself is unreliable.
     """
     qm_indices = []
     qm_elements = {}
@@ -3047,6 +3055,26 @@ def extract_qm_from_pdb(pdb_path):
                 elem = elem.upper()
                 qm_indices.append(serial)
                 qm_elements.setdefault(elem, []).append(str(serial))
+
+    # Audit fix C5: bounds-check serials against the topology when available.
+    if topo is not None and qm_indices:
+        natom = int(getattr(topo, 'natom', 0) or 0)
+        if natom > 0:
+            invalid = sorted({i for i in qm_indices if i < 1 or i > natom})
+            if invalid:
+                warn(
+                    f"PDB QM selection has {len(invalid)} atom serial(s) outside "
+                    f"the topology range [1, {natom}] (e.g. {invalid[:5]}); the "
+                    f"PDB does not match the topology. Dropping out-of-range "
+                    f"serials — verify the QM region is correct before running."
+                )
+                valid = set(range(1, natom + 1))
+                qm_indices = [i for i in qm_indices if i in valid]
+                qm_elements = {
+                    el: [s for s in serials if int(s) in valid]
+                    for el, serials in qm_elements.items()
+                }
+                qm_elements = {el: s for el, s in qm_elements.items() if s}
 
     return qm_elements, qm_indices
 
@@ -6119,9 +6147,21 @@ def compute_qm_cell(qm_indices, coords, padding=6.0, box_dims=None, qmmm_periodi
     )
     qm_coords = []
     ncoord = len(coords or [])
+    # Audit fix H9: out-of-range QM indices must NOT be silently skipped — that
+    # yields an undersized QM cell (wrong QM sizing and QM/MM electrostatic
+    # coupling) with no error.  An index outside [1, ncoord] signals a
+    # coordinate/selection mismatch; fail loudly instead.
+    out_of_range = sorted({int(idx) for idx in (qm_indices or [])
+                           if not (0 < int(idx) <= ncoord)})
+    if out_of_range:
+        raise ValueError(
+            f"compute_qm_cell: {len(out_of_range)} QM index/indices out of range "
+            f"[1, {ncoord}] for the supplied coordinates: {out_of_range[:10]}"
+            f"{'...' if len(out_of_range) > 10 else ''}. The QM selection does not "
+            f"match the coordinate set."
+        )
     for idx in (qm_indices or []):
-        if 0 < int(idx) <= ncoord:
-            qm_coords.append(coords[int(idx) - 1])
+        qm_coords.append(coords[int(idx) - 1])
 
     if not qm_coords:
         return "25.0 25.0 25.0", {
@@ -10262,6 +10302,11 @@ DEFAULT_QMMM_QM_CELL_PADDING = 6.0
 DEFAULT_QMMM_TARGET_MULTIPOLE_RCUT = 8.0
 DEFAULT_QMMM_MINIMUM_IMAGE_BUFFER = 1.0
 MIN_QMMM_GEOMETRIC_RCUT_MARGIN = 0.1
+# Audit fix M1: hard physical floor for the GEEP/MULTIPOLE RCUT. A QM cell so
+# small that the cell-limited RCUT falls below ~1 Å (e.g. a 0.5 Å cell -> ~0.15 Å)
+# truncates the QM/MM electrostatic coupling to essentially nothing, giving
+# catastrophically wrong energetics/forces with no error. Refuse such input.
+MIN_PHYSICAL_QMMM_RCUT = 1.0
 # CP2K's built-in tutorials and thermostat documentation distinguish short
 # CSVR time constants for active equilibration from weaker production coupling.
 # Keep the standard production MD thermostat conservative, but make the first
@@ -10576,6 +10621,16 @@ def evaluate_qmmm_periodic_electrostatics(qm_cell_abc, qmmm_periodic_policy=None
         max_valid_rcut = buffered_limit
     effective_rcut = min(target_rcut, max_valid_rcut)
     rcut_relaxed = effective_rcut + 1.0e-8 < target_rcut
+    # Audit fix M1: refuse a physically meaningless QM/MM coupling range.
+    if effective_rcut < MIN_PHYSICAL_QMMM_RCUT:
+        raise ValueError(
+            f"QM cell {cell_lengths} Å is too small for a usable QM/MM "
+            f"electrostatic coupling: the cell-limited MULTIPOLE RCUT would be "
+            f"{effective_rcut:.3f} Å, below the physical floor of "
+            f"{MIN_PHYSICAL_QMMM_RCUT:.1f} Å (target {target_rcut:.1f} Å). "
+            f"Enlarge the QM cell / padding or reduce the target RCUT to a value "
+            f"that fits at least twice within the cell."
+        )
     return {
         'cell_lengths': cell_lengths,
         'half_min_cell': float(half_min_cell),
@@ -15150,7 +15205,7 @@ if HAS_TEXTUAL:
             # Fallback to PDB HETB/HETD tags.
             if not qm_indices and detected.get('pdb'):
                 try:
-                    pdb_elems, pdb_indices = extract_qm_from_pdb(detected['pdb'])
+                    pdb_elems, pdb_indices = extract_qm_from_pdb(detected['pdb'], topo=app.topo)
                     if pdb_indices:
                         qm_elements = pdb_elems
                         qm_indices = pdb_indices
@@ -17483,7 +17538,7 @@ def _main_cli_wizard():
     # Strategy 2: Try PDB-based extraction (HETB/HETD segments)
     if not qm_indices and detected.get('pdb'):
         detail("Attempting QM extraction from PDB file (HETB/HETD segments)...")
-        qm_elements, qm_indices = extract_qm_from_pdb(detected['pdb'])
+        qm_elements, qm_indices = extract_qm_from_pdb(detected['pdb'], topo=topo)
         if qm_indices:
             info(f"Auto-detected {len(qm_indices)} QM atoms from PDB HETB/HETD segments")
             warn("PDB-based detection captures ligand/cofactor atoms only.")
