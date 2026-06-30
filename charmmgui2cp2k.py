@@ -11315,6 +11315,90 @@ def missing_admm_aux_basis_elements(qm_elements, aux_basis, cp2k_data_dir=None):
     return elems - supported
 
 
+# ── Shared scientific gates (used by both the CLI and the TUI) ───────────────
+#
+# Audit fixes C2/C3/H12: the TUI was a second, weaker code path that skipped
+# several gates the CLI enforced.  These pure helpers centralise the gating
+# logic so both frontends call the *same* validated code and so the logic is
+# unit-testable without mounting a Textual app.
+def forbidden_link_bond_messages(links):
+    """Return a human-readable message per forbidden QM/MM link bond (C2).
+
+    A bond is forbidden when either frontier element is Kr-proxied in AMBER
+    (no covalent parameters → ill-defined IMOMM cap; Maseras & Morokuma 1995;
+    Peters et al., JCTC 6, 2935 (2010)).  Accepts both the CLI link-dict key
+    convention (``QM_ELEM``/``MM_ELEM``/``QM_INDEX``/``MM_INDEX``) and the TUI
+    one (``QM_ELEMENT``/``MM_ELEMENT``/``QM_ATOM_INDEX``/``MM_ATOM_INDEX``).
+    """
+    messages = []
+    for lnk in (links or []):
+        qm_e = lnk.get('QM_ELEM') or lnk.get('QM_ELEMENT')
+        mm_e = lnk.get('MM_ELEM') or lnk.get('MM_ELEMENT')
+        verdict = classify_forbidden_link_bond(qm_e, mm_e)
+        if verdict['forbidden']:
+            qi = lnk.get('QM_INDEX') or lnk.get('QM_ATOM_INDEX') or '?'
+            mi = lnk.get('MM_INDEX') or lnk.get('MM_ATOM_INDEX') or '?'
+            messages.append(
+                f"Forbidden link bond: QM {qm_e}{qi} — MM {mm_e}{mi}: "
+                f"{verdict['reason']} Widen the QM region to include the full "
+                f"coordination sphere, or supply a bonded force field."
+            )
+    return messages
+
+
+def admm_coverage_block_message(qm_elements, use_admm, basis_set=None,
+                                cp2k_data_dir=None):
+    """Return a blocking message when ADMM is on but the auxiliary basis does
+    not cover every QM element (C3); else ``None``.
+
+    Mirrors the CLI ADMM coverage gate: ADMM requires an auxiliary basis
+    covering every QM element (Guidon et al., JCTC 6, 2348 (2010)); a missing
+    AUX_FIT Kind is the documented silent failure (cryptic CP2K SCF-init error).
+    """
+    if not use_admm:
+        return None
+    elems = list(qm_elements.keys()) if hasattr(qm_elements, 'keys') else list(qm_elements or [])
+    if not elems:
+        return None
+    aux = resolve_admm_aux_basis(elems, use_admm=True, basis_set=basis_set)
+    if not aux:
+        return None
+    missing = missing_admm_aux_basis_elements(elems, aux, cp2k_data_dir=cp2k_data_dir)
+    if missing:
+        return (
+            f"ADMM auxiliary basis '{aux}' does not cover "
+            f"{', '.join(sorted(missing))}. Turn off ADMM, narrow the QM "
+            f"region, or supply a custom AUX_FIT basis "
+            f"(Guidon et al., JCTC 6, 2348 (2010))."
+        )
+    return None
+
+
+def validate_md_workflow_params(em_max_iter=None, mm_nvt_steps=None,
+                                mm_npt_steps=None, md_steps=None,
+                                md_timestep=None, md_temperature=None):
+    """Range-check MD workflow parameters (H12); return a list of error strings.
+
+    Mirrors the CLI argument validation (em/nvt/npt/prod steps >= 1, timestep
+    and temperature > 0) so the TUI cannot generate invalid CP2K MD settings
+    the CLI would have rejected.  ``None`` arguments are skipped (not checked).
+    """
+    errors = []
+    for value, name in (
+        (em_max_iter, "EM max iterations"),
+        (mm_nvt_steps, "MM NVT steps"),
+        (mm_npt_steps, "MM NPT steps"),
+        (md_steps, "Production MD steps"),
+    ):
+        if value is not None and int(value) < 1:
+            errors.append(f"{name} must be >= 1.")
+    if md_timestep is not None and float(md_timestep) <= 0:
+        errors.append("MD timestep must be > 0.")
+    if md_temperature is not None and float(md_temperature) <= 0:
+        errors.append("MD temperature must be > 0.")
+    return errors
+
+
 # ── Runtime CP2K data-file availability checks (A2.3) ────────────────────────
 #
 # The emitters gate keyword/basis/dispersion choices against the detected CP2K
@@ -15387,6 +15471,11 @@ if HAS_TEXTUAL:
         def validate(self, app):
             if app.topo is not None and app.qm_indices and not app.boundary_detection_done:
                 return False, ["Boundary detection is still running."]
+            # Audit fix C2: forbidden link bonds must block here, exactly as
+            # the CLI gates them — the TUI previously emitted them silently.
+            forbidden = forbidden_link_bond_messages(app.links or [])
+            if forbidden:
+                return False, forbidden
             return True, []
 
 
@@ -15503,6 +15592,28 @@ if HAS_TEXTUAL:
                 app.geep_lib  = int(self.query_one('#inp-geep', Input).value or str(DEFAULT_QMMM_GEEP_LIB))
             except (NoMatches, ValueError) as exc:
                 app.validation_records.append(('warn', f"method input: {exc}"))
+
+        def validate(self, app):
+            # Audit fix C3: block ADMM when the auxiliary basis cannot cover
+            # every QM element (the CLI enforces this; the TUI did not).
+            try:
+                use_admm = bool(self.query_one('#admm-switch', Switch).value)
+                basis_set = self.query_one('#basis-select', Select).value
+            except NoMatches:
+                use_admm = bool(getattr(app, 'use_admm', False))
+                basis_set = getattr(app, 'basis_set', None)
+            try:
+                msg = admm_coverage_block_message(
+                    app.qm_elements or {}, use_admm, basis_set=basis_set,
+                    cp2k_data_dir=os.environ.get('CP2K_DATA_DIR'),
+                )
+            except Exception:
+                # Never block on an internal coverage-resolution error;
+                # the CLI gate still runs at generation time as a backstop.
+                return True, []
+            if msg:
+                return False, [msg]
+            return True, []
 
 
     # ── Phase 5: ElectronicPhase ─────────────────────────────────────
@@ -15772,6 +15883,26 @@ if HAS_TEXTUAL:
                 app.handoff_policy_mode = self.query_one('#sel-handoff', Select).value
             except (NoMatches, ValueError) as exc:
                 app.validation_records.append(('warn', f"workflow: {exc}"))
+
+        def validate(self, app):
+            # Audit fix H12: range-check MD parameters, mirroring the CLI; the
+            # TUI previously accepted nonsensical values (e.g. 0 fs timestep).
+            def _num(wid, cast):
+                return cast((self.query_one(wid, Input).value or '0').strip())
+            try:
+                errors = validate_md_workflow_params(
+                    em_max_iter=_num('#inp-em', int),
+                    mm_nvt_steps=_num('#inp-nvt', int),
+                    mm_npt_steps=_num('#inp-npt', int),
+                    md_steps=_num('#inp-prod-steps', int),
+                    md_timestep=_num('#inp-prod-dt', float),
+                    md_temperature=_num('#inp-prod-T', float),
+                )
+            except (NoMatches, ValueError):
+                return False, ["Workflow parameters must all be valid numbers."]
+            if errors:
+                return False, errors
+            return True, []
 
 
     # ── Phase 7: PreviewPhase ────────────────────────────────────────
