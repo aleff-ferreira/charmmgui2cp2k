@@ -3049,6 +3049,32 @@ def extract_qm_from_mdin(
     return elements, indices, metadata
 
 
+def _resolve_pdb_element(line, serial, atomic_numbers=None):
+    """Resolve a PDB atom's element symbol (audit fix M2).
+
+    Order of authority: (1) the topology ATOMIC_NUMBER for this serial — the
+    unambiguous ground truth; (2) the PDB element column (77-78) when it names a
+    real element; (3) atom-name inference validated against the element table.
+    Name inference alone silently mis-reads Cα ("CA") as calcium and yields
+    non-elements like "HB"; the topology path removes that ambiguity.
+    """
+    if atomic_numbers is not None and 1 <= serial <= len(atomic_numbers):
+        z = int(atomic_numbers[serial - 1])
+        sym = ATOMIC_NUM_TO_SYMBOL.get(z)
+        if sym:
+            return sym.upper()
+    col = (line[76:78].strip() if len(line) > 77 else '').upper()
+    if col in SYMBOL_TO_ATOMIC_NUM:
+        return col
+    raw_name = line[12:16].strip().upper()
+    two, one = raw_name[:2], raw_name[:1]
+    if two in SYMBOL_TO_ATOMIC_NUM:
+        return two
+    if one in SYMBOL_TO_ATOMIC_NUM:
+        return one
+    return col or one or two or raw_name[:1]
+
+
 def extract_qm_from_pdb(pdb_path, topo=None):
     """
     Extract QM atom indices from PDB file.
@@ -3065,6 +3091,15 @@ def extract_qm_from_pdb(pdb_path, topo=None):
     """
     qm_indices = []
     qm_elements = {}
+
+    # M2: the topology's ATOMIC_NUMBER array is the authoritative element source
+    # (read once; guarded so a lightweight stub topo without get_int_array works).
+    atomic_numbers = None
+    if topo is not None and hasattr(topo, 'get_int_array'):
+        try:
+            atomic_numbers = topo.get_int_array('ATOMIC_NUMBER') or None
+        except Exception:
+            atomic_numbers = None
 
     with open(pdb_path, 'r') as f:
         for line in f:
@@ -3095,12 +3130,7 @@ def extract_qm_from_pdb(pdb_path, topo=None):
                 # elements).  The element column is authoritative
                 # when present.
                 # Ref: wwPDB Format v3.3, Table 4 — ATOM/HETATM.
-                elem = line[76:78].strip() if len(line) > 77 else ''
-                if not elem:
-                    raw_name = line[12:16].strip()
-                    alpha_match = re.match(r'[A-Za-z]{1,2}', raw_name)
-                    elem = alpha_match.group(0) if alpha_match else raw_name[:1]
-                elem = elem.upper()
+                elem = _resolve_pdb_element(line, serial, atomic_numbers)
                 qm_indices.append(serial)
                 qm_elements.setdefault(elem, []).append(str(serial))
 
@@ -16562,7 +16592,15 @@ if HAS_TEXTUAL:
                     qm_elements, basis_set=w.basis_set, use_admm=w.use_admm,
                 )
                 if unresolved_qm_gth:
-                    log_msg("⚠", f"Unresolved GTH entries for: {sorted(unresolved_qm_gth)}")
+                    # Audit fix H2: unresolved GTH pseudopotentials produce
+                    # 'POTENTIAL …-qX' placeholders that crash CP2K at parse
+                    # time — abort generation instead of writing broken input
+                    # (the CLI already hard-stops here).
+                    log_msg("✗", f"Cannot generate valid CP2K input: no GTH "
+                                  f"pseudopotential for element(s) "
+                                  f"{sorted(unresolved_qm_gth)}. Remove them from "
+                                  f"the QM region or add a GTH_CHARGE_MAP entry.")
+                    return
 
                 qmmm_periodic_policy = make_qmmm_periodic_policy()
                 qm_cell_abc, _qm_cell_meta = compute_qm_cell(
@@ -20832,7 +20870,9 @@ def _main_cli_wizard():
             f"Add entries to GTH_CHARGE_MAP or remove these elements from "
             f"the QM region."
         )
-        sys.exit(1)
+        # Audit fix H2/M11: unrunnable input is a scientific-rigor failure;
+        # use STRICT_GATE_EXIT_CODE so CI can distinguish it from usage errors.
+        sys.exit(STRICT_GATE_EXIT_CODE)
     mm_topology_data = collect_topology_variant_data(
         topo,
         qm_syms,
