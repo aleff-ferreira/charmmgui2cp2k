@@ -20022,6 +20022,13 @@ def _main_cli_wizard():
                     if ask_yes("Keep this parity-inconsistent multiplicity anyway?", default=False):
                         break
                     continue
+                if parity_ok is None:
+                    # Audit fix M7: `is False` alone silently accepted a
+                    # multiplicity when the electron count was unknown
+                    # (unresolved elements).  Say so instead of passing mutely.
+                    warn("Parity unverifiable: the QM electron count is unknown "
+                         "(unresolved elements); multiplicity cannot be confirmed "
+                         "physically consistent.")
                 break
             # Re-derive decision as AUTHORITATIVE now that user confirmed.
             spin_decision = recommend_qm_spin_state(
@@ -20049,6 +20056,11 @@ def _main_cli_wizard():
                     if ask_yes("Keep this parity-inconsistent multiplicity anyway?", default=False):
                         break
                     continue
+                if parity_ok is None:
+                    # Audit fix M7 (see AMBIGUOUS path above).
+                    warn("Parity unverifiable: the QM electron count is unknown "
+                         "(unresolved elements); multiplicity cannot be confirmed "
+                         "physically consistent.")
                 break
             if multiplicity != spin_decision['multiplicity']:
                 spin_decision = recommend_qm_spin_state(
@@ -20095,7 +20107,19 @@ def _main_cli_wizard():
                 f"{qm_electrons} electrons.  Provide a parity-consistent "
                 f"--multiplicity value."
             )
-            sys.exit(1)
+            # Audit fix M11: a parity violation is a scientific-rigor failure;
+            # exit with STRICT_GATE_EXIT_CODE so CI/batch can distinguish it
+            # from a usage/input error (exit 1) or an argparse error (exit 2).
+            sys.exit(STRICT_GATE_EXIT_CODE)
+        elif parity_ok is None:
+            # Audit fix M8: `is False` alone silently accepted a multiplicity
+            # when the electron count was unknown.  Warn explicitly; the
+            # unresolved-elements gate concern carries the root cause under
+            # --strict.
+            warn(
+                f"QM electron count is unknown (unresolved elements); "
+                f"multiplicity {multiplicity} parity could not be verified."
+            )
 
     detail(f"QM multiplicity for CP2K &DFT: {multiplicity}")
     detail(f"Spin treatment: {'UKS (open-shell)' if multiplicity != 1 else 'RKS (singlet)'}")
