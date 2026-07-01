@@ -1649,7 +1649,10 @@ def collect_generation_scientific_concerns(charge_conservation=None,
                                            data_availability=None,
                                            spin_decision=None,
                                            qm_electron_meta=None,
-                                           link_bonds=None):
+                                           link_bonds=None,
+                                           qmmm_periodic_meta=None,
+                                           md_timestep=None,
+                                           mgrid_cutoff=None):
     """Flatten the scientific check results into ``[(category, message), ...]``.
 
     Each argument is the dict returned by the corresponding verify_* function
@@ -1710,6 +1713,34 @@ def collect_generation_scientific_concerns(charge_conservation=None,
             concerns.append(('forbidden_link', msg))
         for msg in nonsingle_link_cut_messages(link_bonds):
             concerns.append(('link_bond_order', msg))
+    # P1 (H10/M13): QM/MM MULTIPOLE RCUT relaxed below target because the QM
+    # cell is too small — weakens the QM-MM electrostatic coupling accuracy.
+    if qmmm_periodic_meta and qmmm_periodic_meta.get('rcut_relaxed'):
+        eff = qmmm_periodic_meta.get('effective_rcut')
+        tgt = qmmm_periodic_meta.get('target_rcut')
+        concerns.append((
+            'rcut_reduced',
+            f"QM/MM MULTIPOLE RCUT relaxed to {eff:.2f} Å from target "
+            f"{tgt:.2f} Å because the QM cell is small; this weakens the "
+            f"QM-MM electrostatic coupling accuracy (Laino et al., JCTC 2, "
+            f"1370 (2006)). Enlarge the QM cell / padding."))
+    # P1 (H13): unsafe QM/MM production timestep.
+    if md_timestep is not None and float(md_timestep) > MAX_SAFE_QMMM_TIMESTEP_FS:
+        concerns.append((
+            'md_timestep',
+            f"Production timestep {float(md_timestep):g} fs exceeds "
+            f"{MAX_SAFE_QMMM_TIMESTEP_FS:g} fs; unconstrained QM hydrogens need "
+            f"≤ {MAX_SAFE_QMMM_TIMESTEP_FS:g} fs or the trajectory drifts in "
+            f"energy and SCF may fail."))
+    # P1 (M15): under-converged MGRID plane-wave cutoff.
+    if mgrid_cutoff is not None and float(mgrid_cutoff) < MGRID_CUTOFF_RECOMMENDED_FLOOR_RY - 1.0e-6:
+        concerns.append((
+            'mgrid_cutoff',
+            f"MGRID CUTOFF {float(mgrid_cutoff):g} Ry is below the convergence "
+            f"floor {MGRID_CUTOFF_RECOMMENDED_FLOOR_RY:g} Ry for MOLOPT/GTH "
+            f"bases; an under-converged auxiliary grid distorts forces and "
+            f"spuriously oscillates QM/MM MD (VandeVondele & Hutter, JCP 127, "
+            f"114105 (2007))."))
     return concerns
 
 
@@ -10490,6 +10521,11 @@ DEFAULT_QMMM_QM_CELL_PADDING = 6.0
 DEFAULT_QMMM_TARGET_MULTIPOLE_RCUT = 8.0
 DEFAULT_QMMM_MINIMUM_IMAGE_BUFFER = 1.0
 MIN_QMMM_GEOMETRIC_RCUT_MARGIN = 0.1
+# Audit fix H13: unconstrained QM hydrogens (CP2K does not SHAKE QM atoms)
+# require a short integration step; above ~0.5 fs the fastest X-H stretch is
+# under-sampled and QM/MM MD drifts in energy / risks SCF failure.  A larger
+# step is a --strict gate concern, not a silent default.
+MAX_SAFE_QMMM_TIMESTEP_FS = 0.5
 # Audit fix M1: hard physical floor for the GEEP/MULTIPOLE RCUT. A QM cell so
 # small that the cell-limited RCUT falls below ~1 Å (e.g. a 0.5 Å cell -> ~0.15 Å)
 # truncates the QM/MM electrostatic coupling to essentially nothing, giving
@@ -21541,6 +21577,10 @@ def _main_cli_wizard():
         spin_decision=spin_decision,
         qm_electron_meta=qm_e_meta,
         link_bonds=links,
+        # P1 (H10/M13/H13/M15): accuracy-degradation parameters.
+        qmmm_periodic_meta=qmmm_periodic_meta,
+        md_timestep=md_timestep,
+        mgrid_cutoff=cutoff,
     )
     _gate_passed, _gate_exit = enforce_strict_generation_gate(_gate_concerns, _strict)
     if not _gate_passed:
