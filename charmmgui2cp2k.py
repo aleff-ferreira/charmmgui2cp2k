@@ -1646,11 +1646,25 @@ STRICT_GATE_EXIT_CODE = 3
 
 def collect_generation_scientific_concerns(charge_conservation=None,
                                            link_geometry=None,
-                                           data_availability=None):
+                                           data_availability=None,
+                                           spin_decision=None,
+                                           qm_electron_meta=None,
+                                           link_bonds=None):
     """Flatten the scientific check results into ``[(category, message), ...]``.
 
     Each argument is the dict returned by the corresponding verify_* function
     (or None if that check was not run).  Only failing checks contribute.
+
+    Audit fixes P1 (H6/H7/M9/M10) + C2/C4: beyond the three original structured
+    checks, the gate now also collects the spin/boundary risks that the pipeline
+    previously only ``warn()``-ed about, so ``--strict`` actually refuses them
+    and the formal concerns ledger is not blind to a real rigor failure:
+      * spin ambiguity / risk flags       (H6)  via ``spin_decision``
+      * parity-inconsistent multiplicity  (H7)  via ``spin_decision``
+      * unresolved QM elements            (M10) via ``qm_electron_meta``
+      * duplicate M1 frontier atoms       (M9)  via ``link_bonds``
+      * forbidden (Kr-proxy) link bonds   (C2)  via ``link_bonds``
+      * non-single (π/aromatic) cuts      (C4)  via ``link_bonds``
     """
     concerns = []
     if charge_conservation and not charge_conservation.get('ok', True):
@@ -1662,6 +1676,40 @@ def collect_generation_scientific_concerns(charge_conservation=None,
     if data_availability and not data_availability.get('ok', True):
         concerns += [('data_availability', m)
                      for m in data_availability.get('issues', [])]
+    if spin_decision:
+        if spin_decision.get('decision_class') == 'AMBIGUOUS_REQUIRES_USER':
+            concerns.append((
+                'spin_state',
+                'QM spin state is ambiguous (decision_class='
+                'AMBIGUOUS_REQUIRES_USER); multiplicity requires explicit '
+                'user confirmation.'))
+        for rf in (spin_decision.get('risk_flags') or []):
+            concerns.append(('spin_risk', str(rf)))
+        if spin_decision.get('parity_consistent') is False:
+            concerns.append((
+                'spin_parity',
+                'Multiplicity is parity-inconsistent with the QM electron '
+                'count (physically impossible spin state).'))
+    if qm_electron_meta:
+        unresolved = qm_electron_meta.get('unresolved_elements') or []
+        if unresolved:
+            concerns.append((
+                'unresolved_elements',
+                'QM element(s) without a resolved GTH valence: '
+                f"{', '.join(map(str, unresolved))}; electron count and spin "
+                'parity may be wrong.'))
+    if link_bonds:
+        dups = detect_duplicate_m1_frontier_atoms(link_bonds)
+        if dups:
+            concerns.append((
+                'duplicate_m1',
+                'MM atom(s) act as the frontier (M1) for multiple QM/MM cuts: '
+                f"{', '.join(str(m) for m in sorted(dups))}; doubly-perturbed "
+                'embedding.'))
+        for msg in forbidden_link_bond_messages(link_bonds):
+            concerns.append(('forbidden_link', msg))
+        for msg in nonsingle_link_cut_messages(link_bonds):
+            concerns.append(('link_bond_order', msg))
     return concerns
 
 
@@ -21424,6 +21472,11 @@ def _main_cli_wizard():
             use_admm=use_admm, dispersion_scheme=_dispersion_scheme_resolved,
             cp2k_data_dir=_cp2k_data_dir,
         ),
+        # P1 (H6/H7/M9/M10) + C2/C4: also gate spin/boundary rigor risks that
+        # were previously warned-only, so --strict refuses them.
+        spin_decision=spin_decision,
+        qm_electron_meta=qm_e_meta,
+        link_bonds=links,
     )
     _gate_passed, _gate_exit = enforce_strict_generation_gate(_gate_concerns, _strict)
     if not _gate_passed:
