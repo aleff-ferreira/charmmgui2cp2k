@@ -13,7 +13,13 @@
 > - **C2, C3, H12** — TUI now enforces forbidden-link, ADMM-coverage and MD-range gates via shared helpers. _commit 0e4d365_
 > - **C4, H1, L2** — bond order inferred from `BOND_EQUIL_VALUE`; non-single cuts warned; geometry tolerance 0.40→0.15. _commit a3cb557_
 >
-> P1/P2/P3 items (warn→gate routing for spin/parity/duplicate-M1; peptide/aromatic α; charge-conservation totals; CP2K `--check` golden test; metal-at-boundary fixture) remain open.
+> **P1 remediation status (2026-07-01, branch `fix/scientific-rigor`):** all P1 items **FIXED & test-backed** (207 tests pass, +90 new since the audit):
+> - **H6, H7, M9, M10** — spin ambiguity/risk, parity inconsistency, duplicate-M1, unresolved elements now `--strict` gate concerns (also wired C2 forbidden-link + C4 non-single cuts into the gate). _commit 44db65f_
+> - **M7, M8, M11** — parity `None` (unverifiable) no longer silently accepted; parity-violation exits with `STRICT_GATE_EXIT_CODE` (3). _commit 3fc45fb_
+> - **H2, M2** — TUI blocks unresolved GTH (matching the CLI, now exit 3); PDB elements resolved via topology `ATOMIC_NUMBER` (Cα≠Ca). _commit 000738b_
+> - **H10, H13, M15, M13** — relaxed RCUT, unsafe timestep (>0.5 fs), under-converged MGRID cutoff now `--strict` gate concerns. _commit 9975691_
+>
+> P2/P3 remain open: peptide/aromatic IMOMM α (H3, H4), remove forbidden metals from `COVALENT_RADII_ANG` (M5), charge-conservation totals (H5, M6), basis-name validation (H11, M14), misc (M3, M4, M16, L1, L3, M12), CP2K `--check` golden test, metal-at-boundary fixture (P3).
 
 ---
 
