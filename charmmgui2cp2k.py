@@ -285,6 +285,34 @@ LINK_ALPHA_IMOMM_BY_PAIR = {
     ('SE', 'S'): 1.49,  # 2.19/1.47
 }
 
+# Standard QM-side X–H bond lengths (Å) — the denominators used in the
+# LINK_ALPHA_IMOMM_BY_PAIR table above.  Used to recompute ALPHA_IMOMM =
+# d(QM–MM equilibrium) / d(QM–H) for non-single cuts (audit H3/H4), so a
+# peptide (~1.33 Å → α≈1.22) or aromatic (~1.40 Å → α≈1.28) bond is capped at
+# the correct hydrogen position rather than at the single-bond table value.
+QM_H_BOND_LENGTH_ANG = {
+    'C': 1.09, 'N': 1.01, 'O': 0.96, 'S': 1.34, 'P': 1.44, 'SE': 1.47,
+    'H': 0.74,
+}
+
+
+def refined_alpha_imomm_for_cut(qm_elem, ff_equil_length, fallback_alpha):
+    """Recompute ALPHA_IMOMM from the force-field equilibrium bond length
+    (audit H3/H4).
+
+    ALPHA_IMOMM = d(QM–MM equilibrium) / d(QM–H).  When the cut bond's
+    equilibrium length is known (i.e. for the non-single bonds where the
+    single-bond table value is wrong), this places the link hydrogen at the
+    correct QM–H distance.  Returns ``fallback_alpha`` unchanged when the
+    equilibrium length or the QM-side X–H reference is unavailable.
+    """
+    if ff_equil_length is None:
+        return fallback_alpha
+    qh = QM_H_BOND_LENGTH_ANG.get(str(qm_elem).strip().upper())
+    if not qh or qh <= 0:
+        return fallback_alpha
+    return round(float(ff_equil_length) / qh, 3)
+
 # ── C.1.a: Forbidden-bond classifier via the AMBER "Kr proxy" ───────────
 #
 # Background.  AMBER force fields ship covalent bond, angle, and dihedral
@@ -3375,6 +3403,10 @@ def detect_link_bonds(topo, qm_indices_set, atom_types=None, element_map=None, a
                     if 1 <= int(btype) <= len(bond_equil):
                         ff_req = float(bond_equil[int(btype) - 1])
                     order = classify_link_bond_order(qm_elem, mm_elem, ff_req)
+                    # H3/H4: for non-single cuts the single-bond table ALPHA is
+                    # wrong; recompute it from the actual FF equilibrium length.
+                    if order['class'] in ('elevated', 'multiple'):
+                        alpha = refined_alpha_imomm_for_cut(qm_elem, ff_req, alpha)
                     link = {
                         'QM_INDEX': qm_atom,
                         'MM_INDEX': mm_atom,
@@ -3495,9 +3527,21 @@ LINK_BOND_ORDER_MULTIPLE_MAX_RATIO = 0.86
 
 
 def expected_covalent_bond_length(elem_a, elem_b):
-    """Sum of single-bond covalent radii (Å), or None if either is unknown."""
-    ra = COVALENT_RADII_ANG.get(str(elem_a).strip().upper())
-    rb = COVALENT_RADII_ANG.get(str(elem_b).strip().upper())
+    """Sum of single-bond covalent radii (Å), or None if either is unknown.
+
+    Audit fix M5: a forbidden (Kr-proxy) element — transition metal, noble gas,
+    f-block, etc. — cannot form a standard covalent link in an AMBER force
+    field, so return None rather than a plausible-looking length that would let
+    a forbidden metal cut pass the link-geometry check as 'ok' (the forbidden-
+    link gate handles the metal separately).
+    """
+    a = str(elem_a).strip().upper()
+    b = str(elem_b).strip().upper()
+    if (a in FORBIDDEN_LINK_BOND_KR_PROXY_ELEMENTS
+            or b in FORBIDDEN_LINK_BOND_KR_PROXY_ELEMENTS):
+        return None
+    ra = COVALENT_RADII_ANG.get(a)
+    rb = COVALENT_RADII_ANG.get(b)
     if ra is None or rb is None:
         return None
     return ra + rb
