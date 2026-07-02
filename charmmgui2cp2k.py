@@ -11416,6 +11416,46 @@ def is_standard_molopt_basis_set(basis_set):
     return 'MOLOPT' in value and 'MOLOPT-SR' not in value and '-SR-' not in value
 
 
+# Standard GTH basis families that ship in CP2K's GTH_BASIS_SETS file, beyond
+# the MOLOPT presets, so a plausible custom label can still be recognized.
+_KNOWN_GTH_BASIS_LABELS = frozenset({
+    'SZV-GTH', 'DZV-GTH', 'DZVP-GTH', 'TZVP-GTH', 'TZV2P-GTH', 'TZV2PX-GTH',
+    'QZV2P-GTH', 'QZV3P-GTH',
+})
+
+
+def is_recognized_basis_set(basis_set):
+    """True if the basis label is a known preset or matches the standard
+    GTH/MOLOPT naming pattern (audit H11).
+
+    Recognized labels ship with CP2K (BASIS_MOLOPT / GTH_BASIS_SETS), so no
+    extra ``BASIS_SET_FILE_NAME`` is needed.  An unrecognized label is not
+    rejected — the user may supply a custom basis file — but it is flagged so
+    a typo does not surface only as a cryptic CP2K "no basis set found" error.
+    """
+    value = str(basis_set or '').strip().upper()
+    if not value:
+        return False
+    if value in {b.upper() for b in QM_BASIS_SET_PRESETS}:
+        return True
+    if 'MOLOPT' in value and value.endswith('-GTH'):
+        return True
+    return value in _KNOWN_GTH_BASIS_LABELS
+
+
+def basis_set_recognition_warning(basis_set):
+    """Return a warning string when the QM basis label is not a recognized CP2K
+    preset (custom basis needing an explicit file), else None (audit H11)."""
+    if is_recognized_basis_set(basis_set):
+        return None
+    return (
+        f"QM basis set '{str(basis_set).strip()}' is not a recognized CP2K "
+        f"GTH/MOLOPT preset; CP2K will fail at runtime with 'no basis set "
+        f"found' unless a matching BASIS_SET_FILE_NAME providing it is on the "
+        f"basis path. Check for a typo or supply the custom basis file."
+    )
+
+
 def validate_mgrid_ngrids(ngrids):
     """Validate CP2K MGRID NGRIDS value."""
     try:
@@ -11483,6 +11523,24 @@ def recommend_admm_aux_basis(qm_elements, basis_set=None):
     if not elems or elems <= STANDARD_BIO_ADMM_ELEMENTS:
         return DEFAULT_ADMM_AUX_BASIS
     return 'cFIT3'
+
+
+def admm_recommendation_uncovered_elements(qm_elements, basis_set=None,
+                                           cp2k_data_dir=None):
+    """QM elements the *recommended* ADMM auxiliary basis cannot cover
+    (audit M14).
+
+    Lets a caller surface an ADMM coverage problem at recommendation time —
+    e.g. a QM region containing Fe, for which every curated FIT3 auxiliary
+    basis lacks a Kind — instead of recommending a basis that the coverage gate
+    then rejects post-hoc.  Returns an (empty) set of uppercase symbols.
+    """
+    rec = recommend_admm_aux_basis(qm_elements, basis_set=basis_set)
+    if not rec:
+        return set()
+    elems = (list(qm_elements.keys()) if hasattr(qm_elements, 'keys')
+             else list(qm_elements or []))
+    return missing_admm_aux_basis_elements(elems, rec, cp2k_data_dir=cp2k_data_dir)
 
 
 def resolve_admm_aux_basis(qm_elements, aux_basis=None, use_admm=True, basis_set=None,
@@ -19068,6 +19126,20 @@ def _main_cli_wizard():
         cp2k_capability=cp2k_capability,
         substitutions_log=admm_substitutions_log,
     )
+    # M14: surface an ADMM aux-basis coverage gap at recommendation time (e.g.
+    # a QM Fe that no curated FIT3 basis covers) rather than only rejecting it
+    # at the downstream coverage gate.
+    if use_admm:
+        _admm_uncovered = admm_recommendation_uncovered_elements(
+            qm_elements, basis_set=basis_set,
+        )
+        if _admm_uncovered:
+            warn(
+                f"ADMM auxiliary basis cannot cover "
+                f"{', '.join(sorted(_admm_uncovered))}; ADMM will be disabled "
+                f"at the coverage gate. Narrow the QM region or supply a custom "
+                f"AUX_FIT basis to keep ADMM (Guidon et al., JCTC 6, 2348 (2010))."
+            )
     admm_exch_correction_func = resolve_admm_exch_correction_func(
         functional,
         admm_exch_correction_func,
@@ -19259,6 +19331,20 @@ def _main_cli_wizard():
         cp2k_capability=cp2k_capability,
         substitutions_log=admm_substitutions_log,
     )
+    # M14: surface an ADMM aux-basis coverage gap at recommendation time (e.g.
+    # a QM Fe that no curated FIT3 basis covers) rather than only rejecting it
+    # at the downstream coverage gate.
+    if use_admm:
+        _admm_uncovered = admm_recommendation_uncovered_elements(
+            qm_elements, basis_set=basis_set,
+        )
+        if _admm_uncovered:
+            warn(
+                f"ADMM auxiliary basis cannot cover "
+                f"{', '.join(sorted(_admm_uncovered))}; ADMM will be disabled "
+                f"at the coverage gate. Narrow the QM region or supply a custom "
+                f"AUX_FIT basis to keep ADMM (Guidon et al., JCTC 6, 2348 (2010))."
+            )
     admm_exch_correction_func = resolve_admm_exch_correction_func(
         functional,
         admm_exch_correction_func,
@@ -20967,6 +21053,11 @@ def _main_cli_wizard():
     # POTENTIAL choice is committed to the input file.  See B.1.c for
     # the curated table and literature citations.
     qm_syms = list(qm_elements.keys())
+    # H11: flag a basis-set label CP2K will not recognize (typo / custom basis
+    # needing an explicit file) before it becomes a cryptic runtime failure.
+    _basis_warn = basis_set_recognition_warning(basis_set)
+    if _basis_warn:
+        warn(_basis_warn)
     _gth_pp_prefix = validate_functional_pp_match(
         functional,
         interactive=interactive,
