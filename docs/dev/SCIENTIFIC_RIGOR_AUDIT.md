@@ -19,7 +19,15 @@
 > - **H2, M2** — TUI blocks unresolved GTH (matching the CLI, now exit 3); PDB elements resolved via topology `ATOMIC_NUMBER` (Cα≠Ca). _commit 000738b_
 > - **H10, H13, M15, M13** — relaxed RCUT, unsafe timestep (>0.5 fs), under-converged MGRID cutoff now `--strict` gate concerns. _commit 9975691_
 >
-> P2/P3 remain open: peptide/aromatic IMOMM α (H3, H4), remove forbidden metals from `COVALENT_RADII_ANG` (M5), charge-conservation totals (H5, M6), basis-name validation (H11, M14), misc (M3, M4, M16, L1, L3, M12), CP2K `--check` golden test, metal-at-boundary fixture (P3).
+> **P2 remediation status (2026-07-02, branch `fix/scientific-rigor`):** substantive P2 items **FIXED & test-backed** (238 tests pass, +106 new since the audit):
+> - **H3, H4, M5** — IMOMM α recomputed from the FF equilibrium length for non-single cuts (peptide α≈1.22, aromatic α≈1.28); forbidden metals no longer get a valid covalent length. _commit ac89367_
+> - **H5, M6** — global net-charge conservation check on the emitted topology; cross-channel combined charge aggregate. _commit da1673a_
+> - **H11, M14** — unrecognized basis labels flagged at generation; ADMM coverage surfaced at recommendation time. _commit 39ca5b7_
+> - **M3** — mdin/topology mismatch hard-fails in non-interactive mode. _commit 84196b5_
+>
+> **P2 items deliberately deferred (rationale, not oversight):** M16 (MM timestep > warmup timestep is *normal* staging — gating it would false-positive), L1 (a box-less system legitimately defaults to a 100 Å cube — already warned; strict-blocking would break `demo --strict`), M4 (partial-residue connectivity — needs full graph analysis; already partly covered by the bond-order + forbidden-link gates), M12 (adaptive EWALD_PRECISION — marginal), L3 (explicit restart_vel flag — maintainability-only, no behavior change).
+>
+> **P3 (open):** CP2K `--check` golden-file CI test + transition-metal-at-boundary regression fixture.
 
 ---
 
