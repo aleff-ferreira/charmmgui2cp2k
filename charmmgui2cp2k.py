@@ -3065,6 +3065,7 @@ def extract_qm_from_mdin(
     prmtop_path=None,
     crd_path=None,
     mask_resolver=None,
+    interactive=True,
 ):
     """
     Extract QM atom indices from an AMBER .mdin file.
@@ -3124,6 +3125,18 @@ def extract_qm_from_mdin(
     natom = topo.natom
     invalid = [i for i in indices if i < 1 or i > natom]
     if invalid:
+        # Audit fix M3: out-of-range iqmatoms means the mdin does not match the
+        # topology, so the entire QM selection is untrustworthy.  In
+        # non-interactive mode, silently dropping the user's intended atoms is
+        # a rigor hazard — fail loudly instead.
+        if not interactive:
+            error(
+                f"MDIN {os.path.basename(mdin_path)} lists {len(invalid)} QM "
+                f"iqmatoms outside the topology range [1, {natom}] "
+                f"(e.g. {invalid[:5]}); the mdin does not match this topology. "
+                f"Fix iqmatoms or supply the matching topology."
+            )
+            sys.exit(STRICT_GATE_EXIT_CODE)
         warn(f"MDIN contains {len(invalid)} QM indices out of range (NATOM={natom}), skipping them.")
         indices = [i for i in indices if 1 <= i <= natom]
 
@@ -18017,6 +18030,7 @@ def _main_cli_wizard():
                 atom_types,
                 prmtop_path=detected.get('prmtop'),
                 crd_path=detected.get('rst7'),
+                interactive=interactive,
             )
             if not mdin_result[1]:
                 if len(mdin_candidates) > 1:
