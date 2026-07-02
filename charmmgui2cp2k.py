@@ -1548,6 +1548,12 @@ def _apply_residual_charge_plan_to_raw_charges(charges_raw, residual_charge_plan
 # formatter (8 sig figs ⇒ ~10⁻⁸ relative).
 PRMTOP_CHARGE_VERIFICATION_TOLERANCE = 1.0e-6
 PRMTOP_CHARGE_VERIFICATION_RELATIVE = 1.0e-7
+# Audit fix H5: global net-charge conservation tolerances (electron charge).
+# Per-atom deviations within the hybrid bound can accumulate into a net system
+# charge gain/loss; below the warn tolerance it is numerical noise, above the
+# hard tolerance the system charge is meaningfully non-conserved.
+CHARGE_CONSERVATION_NET_WARN_TOL_E = 1.0e-6
+CHARGE_CONSERVATION_NET_HARD_TOL_E = 1.0e-5
 
 
 def verify_prmtop_charges_match_manifest(
@@ -1658,6 +1664,33 @@ def verify_prmtop_charges_match_manifest(
             "cause is a ParmEd format round-trip that re-normalised the "
             "charges or a silent conversion-path fallback.  Refusing to "
             "proceed so the divergence is investigated before launching MD."
+        )
+
+    # ── H5: global net-charge conservation ───────────────────────────────
+    # Even when every atom is within the per-atom bound, the deviations can
+    # accumulate into a net gain/loss of system charge that silently biases
+    # QM/MM electrostatics, reaction barriers, and pKa-type quantities.  The
+    # per-atom scan above cannot see this; check the total explicitly on the
+    # file CP2K will consume.
+    net_diff_e = abs(
+        sum(float(q) for q in emitted_charges)
+        - sum(float(q) for q in expected)
+    ) / AMBER_CHARGE_SCALE
+    if net_diff_e > CHARGE_CONSERVATION_NET_HARD_TOL_E:
+        raise RuntimeError(
+            "PRMTOP net-charge conservation failed"
+            f"{tag}: the emitted topology's total charge differs from the "
+            f"residual-plan-adjusted manifest by {net_diff_e:.2e} e "
+            f"(> {CHARGE_CONSERVATION_NET_HARD_TOL_E:.1e} e). System charge is "
+            "not conserved — refusing to proceed."
+        )
+    if net_diff_e > CHARGE_CONSERVATION_NET_WARN_TOL_E:
+        warn(
+            f"PRMTOP net-charge drift{tag}: total charge differs from the "
+            f"manifest by {net_diff_e:.2e} e (within the hard limit "
+            f"{CHARGE_CONSERVATION_NET_HARD_TOL_E:.1e} e but above "
+            f"{CHARGE_CONSERVATION_NET_WARN_TOL_E:.1e} e); verify the "
+            "residual-charge redistribution."
         )
 
 
@@ -4118,6 +4151,19 @@ def verify_qmmm_charge_conservation(residual_charge_plan, link_bonds,
             'total_m1_charge_e': float(embedding_total_m1_charge_e),
             'max_drift_e': float(embedding_max_drift_e),
             'consistent': bool(embedding_consistent),
+        },
+        # M6: cross-channel aggregate.  Per-channel checks confirm each channel
+        # balances internally; this rolls the two together so the boundary
+        # audit and the strict gate see a single cross-channel total and the
+        # worst drift across both channels.  (The authoritative net-charge
+        # conservation guarantee is verify_prmtop_charges_match_manifest's H5
+        # total check on the emitted topology.)
+        'combined': {
+            'total_moved_e': float(residual_total_moved_e
+                                   + embedding_total_m1_charge_e),
+            'max_drift_e': float(max(residual_max_drift_e,
+                                     embedding_max_drift_e)),
+            'consistent': bool(residual_consistent and embedding_consistent),
         },
         'issues': issues,
     }
