@@ -1,0 +1,12 @@
+# Build the transition-metal-at-boundary test fixture: dimethylzinc (Zn bonded
+# to two methyls). A QM/MM boundary cutting a Zn-C bond exercises the
+# forbidden-link (C2), ADMM metal-coverage (C3/M14), and spin-ambiguity
+# (H6/M10) paths end-to-end. Dummy-but-valid bonded params (make_metal_znme2.frcmod).
+#   AMBERHOME=/path/to/amber tleap -f make_metal_znme2.tleap
+source leaprc.gaff
+addAtomTypes { { "Zn" "Zn" "sp3" } }
+loadamberparams make_metal_znme2.frcmod
+m = loadmol2 make_metal_znme2.mol2
+saveamberparm m metal_znme2.parm7 metal_znme2.rst7
+savepdb m metal_znme2.pdb
+quit
