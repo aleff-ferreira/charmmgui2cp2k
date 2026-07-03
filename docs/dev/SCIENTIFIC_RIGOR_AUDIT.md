@@ -27,7 +27,11 @@
 >
 > **P2 items deliberately deferred (rationale, not oversight):** M16 (MM timestep > warmup timestep is *normal* staging — gating it would false-positive), L1 (a box-less system legitimately defaults to a 100 Å cube — already warned; strict-blocking would break `demo --strict`), M4 (partial-residue connectivity — needs full graph analysis; already partly covered by the bond-order + forbidden-link gates), M12 (adaptive EWALD_PRECISION — marginal), L3 (explicit restart_vel flag — maintainability-only, no behavior change).
 >
-> **P3 (open):** CP2K `--check` golden-file CI test + transition-metal-at-boundary regression fixture.
+> **P3 remediation status (2026-07-03, branch `fix/scientific-rigor`):** both blind-spot closures **DONE & test-backed** (249 tests pass):
+> - **Generated-output validation** — a CI-runnable end-to-end test asserts the full generated `.inp` is internally consistent (QM_KIND/MM_INDEX, well-formed &LINK, physical &CELL, parity-consistent multiplicity vs electronic_state.dat and boundary_charges.json). _commit (test_generated_input_structure.py)_
+> - **Metal-at-boundary fixture** — a committed dimethylzinc fixture (built with tleap; recipe under tests/fixtures/make_metal_znme2.*) whose QM/MM boundary cuts a Zn–C bond, driving the forbidden-link (C2), ADMM metal-coverage (C3/M14), and spin-ambiguity (H6/M10) paths through the real pipeline to the `--strict` gate. _commit 0a34c4c_
+>
+> **All P0/P1/P2(substantive)/P3 audit items are now resolved. Remaining deferred P2 items (M4/M12/L3/M16/L1) are documented above with rationale.**
 
 ---
 
