@@ -60,20 +60,22 @@ That is the whole path from nothing to a complete, runnable CP2K QM/MM input set
 
 ## Installation
 
-Pick whichever fits — **no build tools, compilers, or scientific stack required.**
+Pick whichever fits — **no AmberTools, compilers, or Conda required.** The only
+runtime dependencies are ParmEd and NumPy (for correct topology preparation),
+both pip-installed automatically; Textual is an optional extra for the TUI.
 
 **A. pipx (recommended).** Isolated, one command, always up to date:
 
 ```bash
 pipx install "charmmgui2cp2k[tui]"   # CLI + TUI
-pipx install charmmgui2cp2k          # CLI only — pure standard library, zero deps
+pipx install charmmgui2cp2k          # CLI only
 ```
 
 **B. pip into a virtual environment:**
 
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
-pip install "charmmgui2cp2k[tui]"    # drop [tui] for the dependency-free CLI
+pip install "charmmgui2cp2k[tui]"    # drop [tui] for the CLI only
 ```
 
 **C. Zero-config, no Python setup (Conda TUI launcher).** Clone and run — the
@@ -88,8 +90,10 @@ cd charmmgui2cp2k
 ./tui reset           # rebuild the environment
 ```
 
-The **CLI wizard needs only Python 3.10+** (it imports the standard library
-only); Textual is an optional extra used solely for the full-screen TUI.
+The **CLI wizard imports with the standard library only** (fast start; `--help`
+and `--version` work immediately), and pulls ParmEd + NumPy for the actual
+topology preparation at generation time. Textual is an optional extra used
+solely for the full-screen TUI.
 
 ## Usage
 

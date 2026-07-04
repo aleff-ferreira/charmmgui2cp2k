@@ -27,12 +27,28 @@ def test_pyproject_declares_project_and_scripts():
     assert 'charmmgui2cp2k-tui = "charmmgui2cp2k:main"' in text
 
 
-def test_cli_has_no_required_dependencies():
-    """The CLI must stay import-light: dependencies = [] in pyproject."""
+def test_runtime_dependencies_declared():
+    """ParmEd (and its NumPy dep) are genuine runtime requirements for
+    generation and must be declared so a pip/pipx install works with no
+    AmberTools. Textual stays an optional extra (TUI only)."""
     text = _pyproject()
-    assert "dependencies = []" in text
-    # Textual is an optional extra, never a hard requirement.
+    assert '"parmed' in text and '"numpy"' in text
     assert 'tui = ["textual' in text
+
+
+def test_cli_imports_without_third_party():
+    """The module must still import with the standard library only (ParmEd is
+    imported lazily at generation time), so --help/--version and the CLI degrade
+    gracefully even before ParmEd is present."""
+    import subprocess
+    import sys
+    proc = subprocess.run(
+        [sys.executable, "-c",
+         "import sys; sys.modules.pop('parmed', None); "
+         "import charmmgui2cp2k; print('ok')"],
+        capture_output=True, text=True, cwd=str(_ROOT),
+    )
+    assert proc.returncode == 0 and "ok" in proc.stdout, proc.stderr
 
 
 def test_version_is_consistent():

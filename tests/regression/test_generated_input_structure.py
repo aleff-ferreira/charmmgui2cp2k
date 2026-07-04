@@ -25,6 +25,14 @@ pytestmark = pytest.mark.regression
 
 _SCRIPT = Path(__file__).resolve().parents[2] / "charmmgui2cp2k.py"
 
+# Full generation requires ParmEd for topology preparation (the manual LJ
+# fallback was removed for correctness). Skip cleanly when neither an in-process
+# ParmEd nor an AmberTools backend is available, so the dependency-free suite
+# still passes; CI installs ParmEd so this runs there.
+_no_parmed = c._get_preferred_parmed_backend() is None
+pytestmark = [pytest.mark.regression,
+              pytest.mark.skipif(_no_parmed, reason="ParmEd not available")]
+
 
 @pytest.fixture(scope="module")
 def demo_output(tmp_path_factory):

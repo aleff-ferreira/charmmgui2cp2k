@@ -27,9 +27,16 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Chemistry",
     "Topic :: Scientific/Engineering :: Physics",
 ]
-# The CLI wizard is pure standard library — no required dependencies, so
-# `pipx install charmmgui2cp2k` gives a working generator on any Python 3.10+.
-dependencies = []
+# The CLI *imports* with the standard library only (fast start, graceful
+# degradation), but generating input requires ParmEd for correct topology
+# preparation (LJ/charge editing via combining rules) — the manual fallback was
+# removed because diagonal-only LJ patching is scientifically wrong.  ParmEd
+# pulls NumPy; both are pip-installed automatically, so
+# `pipx install charmmgui2cp2k` gives a working generator with no AmberTools.
+dependencies = [
+    "parmed>=4.0",
+    "numpy",
+]
 
 [project.optional-dependencies]
 # Full-screen Textual TUI (the plain CLI works without this).
