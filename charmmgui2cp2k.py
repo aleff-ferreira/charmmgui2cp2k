@@ -14779,14 +14779,25 @@ def _score_mdin_candidate(mdin_path):
 def locate_demo_data_dir():
     """Find the bundled demo system (alanine dipeptide), or None.
 
-    Looks next to this script (tests/fixtures) so a fresh checkout can run
-    ``charmmgui2cp2k --demo`` with no input files of its own.
+    Resolves in both layouts so ``charmmgui2cp2k --demo`` works with no input
+    files of its own, whether run from a source checkout (``demo/`` or
+    ``tests/fixtures/`` next to the script) or from a pip/pipx install (the
+    ``demo/`` data ships to ``<prefix>/share/charmmgui2cp2k/demo``).  An
+    explicit ``$CHARMMGUI2CP2K_DEMO_DIR`` overrides everything.
     """
     here = os.path.dirname(os.path.abspath(__file__))
-    for cand in (os.path.join(here, 'tests', 'fixtures'),
-                 os.path.join(here, 'demo'),
-                 os.path.join(here, 'fixtures')):
-        if os.path.isfile(os.path.join(cand, 'ala_dipeptide.parm7')):
+    candidates = [
+        os.environ.get('CHARMMGUI2CP2K_DEMO_DIR'),
+        os.path.join(here, 'demo'),
+        os.path.join(here, 'tests', 'fixtures'),
+        os.path.join(here, 'fixtures'),
+        # Installed data-files location (pip/pipx/venv), and the --user layout.
+        os.path.join(sys.prefix, 'share', 'charmmgui2cp2k', 'demo'),
+        os.path.join(sys.prefix, 'local', 'share', 'charmmgui2cp2k', 'demo'),
+        os.path.join(os.path.expanduser('~/.local'), 'share', 'charmmgui2cp2k', 'demo'),
+    ]
+    for cand in candidates:
+        if cand and os.path.isfile(os.path.join(cand, 'ala_dipeptide.parm7')):
             return cand
     return None
 
@@ -17284,8 +17295,11 @@ def _main_cli_wizard():
     through Screens instead of sequential ask_* calls.
     """
     parser = argparse.ArgumentParser(
+        prog="charmmgui2cp2k",
         description="CHARMM-GUI → CP2K QM/MM Input Generator",
         formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--version', action='version',
+                        version=f'charmmgui2cp2k {__version__}')
     parser.add_argument('--dir', default='.', help='Input directory containing CHARMM-GUI outputs')
     parser.add_argument('--dry-run', action='store_true', help='Validate only, do not write files')
     parser.add_argument('--non-interactive', action='store_true', help='Use all defaults without prompting')
@@ -21810,6 +21824,11 @@ def main():
     import sys as _sys
 
     _argv = _sys.argv[1:]
+    # --version works regardless of frontend (the -tui entry point would
+    # otherwise try to launch the TUI and ignore it).
+    if any(a == '--version' for a in _argv):
+        print(f"charmmgui2cp2k {__version__}")
+        return
     _use_tui = False
     _forced_no_tui = False
     _non_interactive = False
@@ -21929,8 +21948,9 @@ def main():
             f"--tui requested but Textual is not available "
             f"(Python {_sys.version_info.major}.{_sys.version_info.minor}; "
             f"error: {_textual_import_error}).{C.R}\n"
-            f"  {C.DIM}Falling back to plain CLI wizard. "
-            f"Install Textual with: python3.11 -m pip install textual{C.R}"
+            f"  {C.DIM}Falling back to plain CLI wizard. To enable the TUI: "
+            f"pipx install 'charmmgui2cp2k[tui]' (or pip install textual "
+            f"in this environment).{C.R}"
         )
         _main_cli_wizard()
     elif _use_tui and not _sys.stdin.isatty():

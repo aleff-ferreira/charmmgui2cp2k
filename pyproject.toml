@@ -1,3 +1,69 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "charmmgui2cp2k"
+dynamic = ["version"]
+description = "Automated generation of CP2K QM/MM input from CHARMM-GUI / AMBER biomolecular setups"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Aleff Ferreira" }]
+keywords = [
+    "QM/MM", "CP2K", "CHARMM-GUI", "AMBER", "multiscale simulation",
+    "computational chemistry", "molecular dynamics", "input generation",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+# The CLI wizard is pure standard library — no required dependencies, so
+# `pipx install charmmgui2cp2k` gives a working generator on any Python 3.10+.
+dependencies = []
+
+[project.optional-dependencies]
+# Full-screen Textual TUI (the plain CLI works without this).
+tui = ["textual==8.2.5"]
+# Optional YAML config support.
+yaml = ["pyyaml"]
+# Everything needed to run the test suite / develop.
+dev = ["pytest", "pytest-asyncio", "textual==8.2.5", "pyyaml"]
+
+[project.scripts]
+charmmgui2cp2k = "charmmgui2cp2k:main"
+charmmgui2cp2k-tui = "charmmgui2cp2k:main"
+
+[project.urls]
+Homepage = "https://github.com/aleff-ferreira/charmmgui2cp2k"
+Repository = "https://github.com/aleff-ferreira/charmmgui2cp2k"
+Issues = "https://github.com/aleff-ferreira/charmmgui2cp2k/issues"
+
+[tool.setuptools]
+py-modules = ["charmmgui2cp2k"]
+
+[tool.setuptools.dynamic]
+version = { attr = "charmmgui2cp2k.__version__" }
+
+# Ship the one-command demo system so `charmmgui2cp2k --demo` works from a
+# pip/pipx install, not only from a source checkout.
+[tool.setuptools.data-files]
+"share/charmmgui2cp2k/demo" = [
+    "demo/ala_dipeptide.parm7",
+    "demo/ala_dipeptide.rst7",
+    "demo/ala_dipeptide.pdb",
+    "demo/ala_dipeptide_qmmm.mdin",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
