@@ -285,6 +285,34 @@ LINK_ALPHA_IMOMM_BY_PAIR = {
     ('SE', 'S'): 1.49,  # 2.19/1.47
 }
 
+# Standard QM-side X–H bond lengths (Å) — the denominators used in the
+# LINK_ALPHA_IMOMM_BY_PAIR table above.  Used to recompute ALPHA_IMOMM =
+# d(QM–MM equilibrium) / d(QM–H) for non-single cuts (audit H3/H4), so a
+# peptide (~1.33 Å → α≈1.22) or aromatic (~1.40 Å → α≈1.28) bond is capped at
+# the correct hydrogen position rather than at the single-bond table value.
+QM_H_BOND_LENGTH_ANG = {
+    'C': 1.09, 'N': 1.01, 'O': 0.96, 'S': 1.34, 'P': 1.44, 'SE': 1.47,
+    'H': 0.74,
+}
+
+
+def refined_alpha_imomm_for_cut(qm_elem, ff_equil_length, fallback_alpha):
+    """Recompute ALPHA_IMOMM from the force-field equilibrium bond length
+    (audit H3/H4).
+
+    ALPHA_IMOMM = d(QM–MM equilibrium) / d(QM–H).  When the cut bond's
+    equilibrium length is known (i.e. for the non-single bonds where the
+    single-bond table value is wrong), this places the link hydrogen at the
+    correct QM–H distance.  Returns ``fallback_alpha`` unchanged when the
+    equilibrium length or the QM-side X–H reference is unavailable.
+    """
+    if ff_equil_length is None:
+        return fallback_alpha
+    qh = QM_H_BOND_LENGTH_ANG.get(str(qm_elem).strip().upper())
+    if not qh or qh <= 0:
+        return fallback_alpha
+    return round(float(ff_equil_length) / qh, 3)
+
 # ── C.1.a: Forbidden-bond classifier via the AMBER "Kr proxy" ───────────
 #
 # Background.  AMBER force fields ship covalent bond, angle, and dihedral
@@ -1520,6 +1548,12 @@ def _apply_residual_charge_plan_to_raw_charges(charges_raw, residual_charge_plan
 # formatter (8 sig figs ⇒ ~10⁻⁸ relative).
 PRMTOP_CHARGE_VERIFICATION_TOLERANCE = 1.0e-6
 PRMTOP_CHARGE_VERIFICATION_RELATIVE = 1.0e-7
+# Audit fix H5: global net-charge conservation tolerances (electron charge).
+# Per-atom deviations within the hybrid bound can accumulate into a net system
+# charge gain/loss; below the warn tolerance it is numerical noise, above the
+# hard tolerance the system charge is meaningfully non-conserved.
+CHARGE_CONSERVATION_NET_WARN_TOL_E = 1.0e-6
+CHARGE_CONSERVATION_NET_HARD_TOL_E = 1.0e-5
 
 
 def verify_prmtop_charges_match_manifest(
@@ -1632,6 +1666,33 @@ def verify_prmtop_charges_match_manifest(
             "proceed so the divergence is investigated before launching MD."
         )
 
+    # ── H5: global net-charge conservation ───────────────────────────────
+    # Even when every atom is within the per-atom bound, the deviations can
+    # accumulate into a net gain/loss of system charge that silently biases
+    # QM/MM electrostatics, reaction barriers, and pKa-type quantities.  The
+    # per-atom scan above cannot see this; check the total explicitly on the
+    # file CP2K will consume.
+    net_diff_e = abs(
+        sum(float(q) for q in emitted_charges)
+        - sum(float(q) for q in expected)
+    ) / AMBER_CHARGE_SCALE
+    if net_diff_e > CHARGE_CONSERVATION_NET_HARD_TOL_E:
+        raise RuntimeError(
+            "PRMTOP net-charge conservation failed"
+            f"{tag}: the emitted topology's total charge differs from the "
+            f"residual-plan-adjusted manifest by {net_diff_e:.2e} e "
+            f"(> {CHARGE_CONSERVATION_NET_HARD_TOL_E:.1e} e). System charge is "
+            "not conserved — refusing to proceed."
+        )
+    if net_diff_e > CHARGE_CONSERVATION_NET_WARN_TOL_E:
+        warn(
+            f"PRMTOP net-charge drift{tag}: total charge differs from the "
+            f"manifest by {net_diff_e:.2e} e (within the hard limit "
+            f"{CHARGE_CONSERVATION_NET_HARD_TOL_E:.1e} e but above "
+            f"{CHARGE_CONSERVATION_NET_WARN_TOL_E:.1e} e); verify the "
+            "residual-charge redistribution."
+        )
+
 
 # ── Strict-mode generation gate (A3.3) ──────────────────────────────────────
 #
@@ -1646,11 +1707,28 @@ STRICT_GATE_EXIT_CODE = 3
 
 def collect_generation_scientific_concerns(charge_conservation=None,
                                            link_geometry=None,
-                                           data_availability=None):
+                                           data_availability=None,
+                                           spin_decision=None,
+                                           qm_electron_meta=None,
+                                           link_bonds=None,
+                                           qmmm_periodic_meta=None,
+                                           md_timestep=None,
+                                           mgrid_cutoff=None):
     """Flatten the scientific check results into ``[(category, message), ...]``.
 
     Each argument is the dict returned by the corresponding verify_* function
     (or None if that check was not run).  Only failing checks contribute.
+
+    Audit fixes P1 (H6/H7/M9/M10) + C2/C4: beyond the three original structured
+    checks, the gate now also collects the spin/boundary risks that the pipeline
+    previously only ``warn()``-ed about, so ``--strict`` actually refuses them
+    and the formal concerns ledger is not blind to a real rigor failure:
+      * spin ambiguity / risk flags       (H6)  via ``spin_decision``
+      * parity-inconsistent multiplicity  (H7)  via ``spin_decision``
+      * unresolved QM elements            (M10) via ``qm_electron_meta``
+      * duplicate M1 frontier atoms       (M9)  via ``link_bonds``
+      * forbidden (Kr-proxy) link bonds   (C2)  via ``link_bonds``
+      * non-single (π/aromatic) cuts      (C4)  via ``link_bonds``
     """
     concerns = []
     if charge_conservation and not charge_conservation.get('ok', True):
@@ -1662,6 +1740,68 @@ def collect_generation_scientific_concerns(charge_conservation=None,
     if data_availability and not data_availability.get('ok', True):
         concerns += [('data_availability', m)
                      for m in data_availability.get('issues', [])]
+    if spin_decision:
+        if spin_decision.get('decision_class') == 'AMBIGUOUS_REQUIRES_USER':
+            concerns.append((
+                'spin_state',
+                'QM spin state is ambiguous (decision_class='
+                'AMBIGUOUS_REQUIRES_USER); multiplicity requires explicit '
+                'user confirmation.'))
+        for rf in (spin_decision.get('risk_flags') or []):
+            concerns.append(('spin_risk', str(rf)))
+        if spin_decision.get('parity_consistent') is False:
+            concerns.append((
+                'spin_parity',
+                'Multiplicity is parity-inconsistent with the QM electron '
+                'count (physically impossible spin state).'))
+    if qm_electron_meta:
+        unresolved = qm_electron_meta.get('unresolved_elements') or []
+        if unresolved:
+            concerns.append((
+                'unresolved_elements',
+                'QM element(s) without a resolved GTH valence: '
+                f"{', '.join(map(str, unresolved))}; electron count and spin "
+                'parity may be wrong.'))
+    if link_bonds:
+        dups = detect_duplicate_m1_frontier_atoms(link_bonds)
+        if dups:
+            concerns.append((
+                'duplicate_m1',
+                'MM atom(s) act as the frontier (M1) for multiple QM/MM cuts: '
+                f"{', '.join(str(m) for m in sorted(dups))}; doubly-perturbed "
+                'embedding.'))
+        for msg in forbidden_link_bond_messages(link_bonds):
+            concerns.append(('forbidden_link', msg))
+        for msg in nonsingle_link_cut_messages(link_bonds):
+            concerns.append(('link_bond_order', msg))
+    # P1 (H10/M13): QM/MM MULTIPOLE RCUT relaxed below target because the QM
+    # cell is too small — weakens the QM-MM electrostatic coupling accuracy.
+    if qmmm_periodic_meta and qmmm_periodic_meta.get('rcut_relaxed'):
+        eff = qmmm_periodic_meta.get('effective_rcut')
+        tgt = qmmm_periodic_meta.get('target_rcut')
+        concerns.append((
+            'rcut_reduced',
+            f"QM/MM MULTIPOLE RCUT relaxed to {eff:.2f} Å from target "
+            f"{tgt:.2f} Å because the QM cell is small; this weakens the "
+            f"QM-MM electrostatic coupling accuracy (Laino et al., JCTC 2, "
+            f"1370 (2006)). Enlarge the QM cell / padding."))
+    # P1 (H13): unsafe QM/MM production timestep.
+    if md_timestep is not None and float(md_timestep) > MAX_SAFE_QMMM_TIMESTEP_FS:
+        concerns.append((
+            'md_timestep',
+            f"Production timestep {float(md_timestep):g} fs exceeds "
+            f"{MAX_SAFE_QMMM_TIMESTEP_FS:g} fs; unconstrained QM hydrogens need "
+            f"≤ {MAX_SAFE_QMMM_TIMESTEP_FS:g} fs or the trajectory drifts in "
+            f"energy and SCF may fail."))
+    # P1 (M15): under-converged MGRID plane-wave cutoff.
+    if mgrid_cutoff is not None and float(mgrid_cutoff) < MGRID_CUTOFF_RECOMMENDED_FLOOR_RY - 1.0e-6:
+        concerns.append((
+            'mgrid_cutoff',
+            f"MGRID CUTOFF {float(mgrid_cutoff):g} Ry is below the convergence "
+            f"floor {MGRID_CUTOFF_RECOMMENDED_FLOOR_RY:g} Ry for MOLOPT/GTH "
+            f"bases; an under-converged auxiliary grid distorts forces and "
+            f"spuriously oscillates QM/MM MD (VandeVondele & Hutter, JCP 127, "
+            f"114105 (2007))."))
     return concerns
 
 
@@ -2925,6 +3065,7 @@ def extract_qm_from_mdin(
     prmtop_path=None,
     crd_path=None,
     mask_resolver=None,
+    interactive=True,
 ):
     """
     Extract QM atom indices from an AMBER .mdin file.
@@ -2984,6 +3125,18 @@ def extract_qm_from_mdin(
     natom = topo.natom
     invalid = [i for i in indices if i < 1 or i > natom]
     if invalid:
+        # Audit fix M3: out-of-range iqmatoms means the mdin does not match the
+        # topology, so the entire QM selection is untrustworthy.  In
+        # non-interactive mode, silently dropping the user's intended atoms is
+        # a rigor hazard — fail loudly instead.
+        if not interactive:
+            error(
+                f"MDIN {os.path.basename(mdin_path)} lists {len(invalid)} QM "
+                f"iqmatoms outside the topology range [1, {natom}] "
+                f"(e.g. {invalid[:5]}); the mdin does not match this topology. "
+                f"Fix iqmatoms or supply the matching topology."
+            )
+            sys.exit(STRICT_GATE_EXIT_CODE)
         warn(f"MDIN contains {len(invalid)} QM indices out of range (NATOM={natom}), skipping them.")
         indices = [i for i in indices if 1 <= i <= natom]
 
@@ -3001,14 +3154,57 @@ def extract_qm_from_mdin(
     return elements, indices, metadata
 
 
-def extract_qm_from_pdb(pdb_path):
+def _resolve_pdb_element(line, serial, atomic_numbers=None):
+    """Resolve a PDB atom's element symbol (audit fix M2).
+
+    Order of authority: (1) the topology ATOMIC_NUMBER for this serial — the
+    unambiguous ground truth; (2) the PDB element column (77-78) when it names a
+    real element; (3) atom-name inference validated against the element table.
+    Name inference alone silently mis-reads Cα ("CA") as calcium and yields
+    non-elements like "HB"; the topology path removes that ambiguity.
+    """
+    if atomic_numbers is not None and 1 <= serial <= len(atomic_numbers):
+        z = int(atomic_numbers[serial - 1])
+        sym = ATOMIC_NUM_TO_SYMBOL.get(z)
+        if sym:
+            return sym.upper()
+    col = (line[76:78].strip() if len(line) > 77 else '').upper()
+    if col in SYMBOL_TO_ATOMIC_NUM:
+        return col
+    raw_name = line[12:16].strip().upper()
+    two, one = raw_name[:2], raw_name[:1]
+    if two in SYMBOL_TO_ATOMIC_NUM:
+        return two
+    if one in SYMBOL_TO_ATOMIC_NUM:
+        return one
+    return col or one or two or raw_name[:1]
+
+
+def extract_qm_from_pdb(pdb_path, topo=None):
     """
     Extract QM atom indices from PDB file.
     CHARMM-GUI marks QM atoms with specific residue names or segment IDs.
     Returns 1-based indices grouped by element.
+
+    Audit fix C5: when ``topo`` is supplied, PDB serials are validated against
+    the topology atom count (NATOM).  Out-of-range serials are dropped with a
+    warning, because otherwise they propagate three ways downstream — phantom
+    QM/MM links in ``detect_link_bonds``, invalid ``MM_INDEX`` in ``&QM_KIND``
+    (a CP2K runtime failure), and ``'X'`` element fallbacks that corrupt the
+    electron count and the spin decision.  An out-of-range serial means the PDB
+    does not match the topology, so the QM selection itself is unreliable.
     """
     qm_indices = []
     qm_elements = {}
+
+    # M2: the topology's ATOMIC_NUMBER array is the authoritative element source
+    # (read once; guarded so a lightweight stub topo without get_int_array works).
+    atomic_numbers = None
+    if topo is not None and hasattr(topo, 'get_int_array'):
+        try:
+            atomic_numbers = topo.get_int_array('ATOMIC_NUMBER') or None
+        except Exception:
+            atomic_numbers = None
 
     with open(pdb_path, 'r') as f:
         for line in f:
@@ -3039,14 +3235,29 @@ def extract_qm_from_pdb(pdb_path):
                 # elements).  The element column is authoritative
                 # when present.
                 # Ref: wwPDB Format v3.3, Table 4 — ATOM/HETATM.
-                elem = line[76:78].strip() if len(line) > 77 else ''
-                if not elem:
-                    raw_name = line[12:16].strip()
-                    alpha_match = re.match(r'[A-Za-z]{1,2}', raw_name)
-                    elem = alpha_match.group(0) if alpha_match else raw_name[:1]
-                elem = elem.upper()
+                elem = _resolve_pdb_element(line, serial, atomic_numbers)
                 qm_indices.append(serial)
                 qm_elements.setdefault(elem, []).append(str(serial))
+
+    # Audit fix C5: bounds-check serials against the topology when available.
+    if topo is not None and qm_indices:
+        natom = int(getattr(topo, 'natom', 0) or 0)
+        if natom > 0:
+            invalid = sorted({i for i in qm_indices if i < 1 or i > natom})
+            if invalid:
+                warn(
+                    f"PDB QM selection has {len(invalid)} atom serial(s) outside "
+                    f"the topology range [1, {natom}] (e.g. {invalid[:5]}); the "
+                    f"PDB does not match the topology. Dropping out-of-range "
+                    f"serials — verify the QM region is correct before running."
+                )
+                valid = set(range(1, natom + 1))
+                qm_indices = [i for i in qm_indices if i in valid]
+                qm_elements = {
+                    el: [s for s in serials if int(s) in valid]
+                    for el, serials in qm_elements.items()
+                }
+                qm_elements = {el: s for el, s in qm_elements.items() if s}
 
     return qm_elements, qm_indices
 
@@ -3201,16 +3412,22 @@ def detect_link_bonds(topo, qm_indices_set, atom_types=None, element_map=None, a
     """
     bonds_h = topo.get_int_array('BONDS_INC_HYDROGEN')
     bonds_a = topo.get_int_array('BONDS_WITHOUT_HYDROGEN')
+    # Audit fix H1/C4: the bond-type index (third value of each AMBER bond
+    # triplet) indexes BOND_EQUIL_VALUE — the force-field equilibrium length,
+    # which is the only available signal for chemical bond order in a prmtop.
+    bond_equil = topo.get_float_array('BOND_EQUIL_VALUE') or []
 
     links = []
     seen = set()
     unknown_alpha_pairs = set()
+    nonsingle_cuts = []
 
     for bond_arr in [bonds_h, bonds_a]:
         # AMBER bonds: (i/3, j/3, type) triplets with coordinate indices
         for k in range(0, len(bond_arr) - 2, 3):
             a1 = bond_arr[k] // 3 + 1     # 1-based
             a2 = bond_arr[k+1] // 3 + 1   # 1-based
+            btype = bond_arr[k+2]         # 1-based bond-type index (FF params)
 
             in_qm_1 = a1 in qm_indices_set
             in_qm_2 = a2 in qm_indices_set
@@ -3226,19 +3443,42 @@ def detect_link_bonds(topo, qm_indices_set, atom_types=None, element_map=None, a
                     alpha = _alpha_imomm_for_pair(qm_elem, mm_elem)
                     if alpha == DEFAULT_ALPHA_IMOMM and (qm_elem, mm_elem) not in LINK_ALPHA_IMOMM_BY_PAIR and (mm_elem, qm_elem) not in LINK_ALPHA_IMOMM_BY_PAIR:
                         unknown_alpha_pairs.add((qm_elem, mm_elem))
-                    links.append({
+                    # Force-field equilibrium length for this bond, then the
+                    # inferred bond order (single vs aromatic/double/triple).
+                    ff_req = None
+                    if 1 <= int(btype) <= len(bond_equil):
+                        ff_req = float(bond_equil[int(btype) - 1])
+                    order = classify_link_bond_order(qm_elem, mm_elem, ff_req)
+                    # H3/H4: for non-single cuts the single-bond table ALPHA is
+                    # wrong; recompute it from the actual FF equilibrium length.
+                    if order['class'] in ('elevated', 'multiple'):
+                        alpha = refined_alpha_imomm_for_cut(qm_elem, ff_req, alpha)
+                    link = {
                         'QM_INDEX': qm_atom,
                         'MM_INDEX': mm_atom,
                         'QM_ELEM': qm_elem,
                         'MM_ELEM': mm_elem,
                         'ALPHA_IMOMM': alpha,
-                    })
+                        'FF_BOND_TYPE_INDEX': int(btype),
+                        'FF_EQUIL_LENGTH': ff_req,
+                        'BOND_ORDER_CLASS': order['class'],
+                        'BOND_ORDER_RATIO': order['ratio'],
+                    }
+                    links.append(link)
+                    if not order['is_single'] and order['class'] != 'unknown':
+                        nonsingle_cuts.append(link)
 
     if unknown_alpha_pairs:
         pairs = ", ".join(f"{a}-{b}" for a, b in sorted(unknown_alpha_pairs))
         warn(
             f"Using default ALPHA_IMOMM={DEFAULT_ALPHA_IMOMM:.2f} for unsupported boundary pairs: {pairs}"
         )
+
+    # Audit fix C4/H1: never silently cap a non-single bond with an IMOMM
+    # hydrogen — surface it loudly (the strict gate / boundary audit also carry
+    # the recorded BOND_ORDER_CLASS).
+    for msg in nonsingle_link_cut_messages(nonsingle_cuts):
+        warn(msg)
 
     return links
 
@@ -3308,19 +3548,116 @@ COVALENT_RADII_ANG = {
     'K': 2.03, 'CA': 1.76, 'MN': 1.39, 'FE': 1.32, 'CO': 1.26,
     'NI': 1.24, 'CU': 1.32, 'ZN': 1.22, 'SE': 1.20, 'BR': 1.20, 'I': 1.39,
 }
-# Fractional tolerance on the expected covalent bond length before a link is
-# flagged.  ±40% is permissive enough not to fire on normal force-field bond
-# stretching yet still catches clashes (<~0.5x) and non-bonds (>~1.5x).
-LINK_GEOMETRY_TOLERANCE_FRAC = 0.40
+# Fractional tolerance on the expected single-bond covalent length before a link
+# is flagged on GEOMETRY (audit fix C4 + L2).  Tightened from the old ±40% — a
+# window of [0.92x, 1.40x] of a C-C single bond (1.40 - 2.16 Å) silently
+# accepted double (1.34 Å), aromatic (1.40 Å) and triple (1.20 Å) bonds as
+# "ok".  ±15% ([1.29, 1.75] Å for C-C) still tolerates normal force-field
+# stretching in a single snapshot while catching clashes and broken/non-bonds.
+# Geometry alone cannot separate a double bond from a stretched single bond,
+# so chemical bond order is detected separately from the force-field
+# equilibrium length (see classify_link_bond_order); the two checks are
+# complementary.
+LINK_GEOMETRY_TOLERANCE_FRAC = 0.15
+
+# Bond-order classification thresholds (audit fix C4/H1).  AMBER prmtops store
+# no chemical bond order, but BOND_EQUIL_VALUE (the force-field equilibrium
+# length) encodes bond character: aromatic/peptide/double/triple bonds are
+# markedly shorter than the single-bond covalent reference (sum of Cordero 2008
+# radii).  A cut is treated as single only when its FF equilibrium length is at
+# least this fraction of that reference; below LINK_BOND_ORDER_MULTIPLE_MAX_RATIO
+# it is a clear double/triple bond.  IMOMM hydrogen capping is only valid for
+# single-bond cuts (Maseras & Morokuma, J. Comput. Chem. 16, 1170 (1995)).
+LINK_BOND_ORDER_SINGLE_MIN_RATIO = 0.94
+LINK_BOND_ORDER_MULTIPLE_MAX_RATIO = 0.86
 
 
 def expected_covalent_bond_length(elem_a, elem_b):
-    """Sum of single-bond covalent radii (Å), or None if either is unknown."""
-    ra = COVALENT_RADII_ANG.get(str(elem_a).strip().upper())
-    rb = COVALENT_RADII_ANG.get(str(elem_b).strip().upper())
+    """Sum of single-bond covalent radii (Å), or None if either is unknown.
+
+    Audit fix M5: a forbidden (Kr-proxy) element — transition metal, noble gas,
+    f-block, etc. — cannot form a standard covalent link in an AMBER force
+    field, so return None rather than a plausible-looking length that would let
+    a forbidden metal cut pass the link-geometry check as 'ok' (the forbidden-
+    link gate handles the metal separately).
+    """
+    a = str(elem_a).strip().upper()
+    b = str(elem_b).strip().upper()
+    if (a in FORBIDDEN_LINK_BOND_KR_PROXY_ELEMENTS
+            or b in FORBIDDEN_LINK_BOND_KR_PROXY_ELEMENTS):
+        return None
+    ra = COVALENT_RADII_ANG.get(a)
+    rb = COVALENT_RADII_ANG.get(b)
     if ra is None or rb is None:
         return None
     return ra + rb
+
+
+def classify_link_bond_order(qm_elem, mm_elem, ff_equil_length):
+    """Infer the chemical order of a QM/MM cut bond (audit fix C4/H1).
+
+    AMBER stores no bond order, but the force-field equilibrium length
+    (``BOND_EQUIL_VALUE`` for the bond's type index) encodes bond character:
+    aromatic/peptide/double/triple bonds sit well below the single-bond
+    covalent reference.  IMOMM hydrogen capping is only physically valid for a
+    *single*-bond cut — capping a severed double/aromatic/peptide bond with a
+    single-bond hydrogen mismatches the QM/MM Hamiltonian and the embedding
+    field.
+
+    Returns a dict::
+
+        {'class': 'single'|'elevated'|'multiple'|'unknown',
+         'ratio': <ff_equil / single_ref> | None,
+         'single_ref_A': float | None,
+         'ff_equil_A': float | None,
+         'is_single': bool}
+
+    ``is_single`` is True for 'single' and (conservatively) for 'unknown', so a
+    missing equilibrium length or radius never raises a false alarm.
+    """
+    single_ref = expected_covalent_bond_length(qm_elem, mm_elem)
+    if ff_equil_length is None or single_ref is None or single_ref <= 0:
+        return {'class': 'unknown', 'ratio': None, 'single_ref_A': single_ref,
+                'ff_equil_A': (float(ff_equil_length)
+                               if ff_equil_length is not None else None),
+                'is_single': True}
+    ratio = float(ff_equil_length) / float(single_ref)
+    if ratio >= LINK_BOND_ORDER_SINGLE_MIN_RATIO:
+        cls = 'single'
+    elif ratio >= LINK_BOND_ORDER_MULTIPLE_MAX_RATIO:
+        cls = 'elevated'   # aromatic / peptide / partial double character
+    else:
+        cls = 'multiple'   # double / triple
+    return {'class': cls, 'ratio': ratio, 'single_ref_A': float(single_ref),
+            'ff_equil_A': float(ff_equil_length), 'is_single': cls == 'single'}
+
+
+def nonsingle_link_cut_messages(links):
+    """Human-readable warning per QM/MM cut that is not a clean single bond
+    (audit fix C4/H1).  Reads ``BOND_ORDER_CLASS``/``FF_EQUIL_LENGTH`` recorded
+    on each link by ``detect_link_bonds``.  Accepts both link-dict key
+    conventions for elements/indices.
+    """
+    messages = []
+    for lnk in (links or []):
+        cls = lnk.get('BOND_ORDER_CLASS')
+        if cls not in ('elevated', 'multiple'):
+            continue
+        qm_e = lnk.get('QM_ELEM') or lnk.get('QM_ELEMENT')
+        mm_e = lnk.get('MM_ELEM') or lnk.get('MM_ELEMENT')
+        qi = lnk.get('QM_INDEX') or lnk.get('QM_ATOM_INDEX') or '?'
+        mi = lnk.get('MM_INDEX') or lnk.get('MM_ATOM_INDEX') or '?'
+        req = lnk.get('FF_EQUIL_LENGTH')
+        kind = ('a double/triple bond' if cls == 'multiple'
+                else 'an aromatic/peptide/partial-double bond')
+        req_txt = f"{req:.3f} Å" if isinstance(req, (int, float)) else "n/a"
+        messages.append(
+            f"Non-single QM/MM cut: QM {qm_e}{qi} — MM {mm_e}{mi} looks like "
+            f"{kind} (force-field equilibrium {req_txt}). IMOMM hydrogen capping "
+            f"is only valid for single bonds; enclose the full conjugated/aromatic "
+            f"group in the QM region or move the cut to an adjacent single bond."
+        )
+    return messages
 
 
 def verify_link_geometry(links, coords, tolerance_frac=LINK_GEOMETRY_TOLERANCE_FRAC):
@@ -3828,6 +4165,19 @@ def verify_qmmm_charge_conservation(residual_charge_plan, link_bonds,
             'max_drift_e': float(embedding_max_drift_e),
             'consistent': bool(embedding_consistent),
         },
+        # M6: cross-channel aggregate.  Per-channel checks confirm each channel
+        # balances internally; this rolls the two together so the boundary
+        # audit and the strict gate see a single cross-channel total and the
+        # worst drift across both channels.  (The authoritative net-charge
+        # conservation guarantee is verify_prmtop_charges_match_manifest's H5
+        # total check on the emitted topology.)
+        'combined': {
+            'total_moved_e': float(residual_total_moved_e
+                                   + embedding_total_m1_charge_e),
+            'max_drift_e': float(max(residual_max_drift_e,
+                                     embedding_max_drift_e)),
+            'consistent': bool(residual_consistent and embedding_consistent),
+        },
         'issues': issues,
     }
 
@@ -4120,6 +4470,11 @@ _FUNCTIONAL_DFTD3_PARAMETER_AVAILABLE = {
 # DFTD3 instead" to stay safe.
 CP2K_DFTD4_MIN_VERSION = (8, 1)
 
+# Canonical keyword path for the DFTD4 dispersion TYPE; used both as a
+# CP2K_KEYWORD_MIN_VERSION entry (for capability reporting / coherence) and
+# in the generation-time version guard, so the two never drift.
+CP2K_DFTD4_TYPE_KEYWORD = '&FORCE_EVAL/&DFT/&XC/&VDW_POTENTIAL/&PAIR_POTENTIAL/TYPE (DFTD4)'
+
 _FUNCTIONAL_DFTD4_PARAMETER_AVAILABLE = {
     # Common GGAs
     'PBE':        True,
@@ -4280,6 +4635,48 @@ def _validate_dispersion_scheme(scheme):
             f"Allowed: {', '.join(DISPERSION_SCHEMES)}"
         )
     return key
+
+
+def validate_dispersion_scheme_version(scheme, cp2k_version_tuple,
+                                       source='configuration'):
+    """Hard-gate DFTD4 against the minimum CP2K version (audit fix C1).
+
+    DFTD4 requires the s-dftd4 library linked into CP2K >= 8.1
+    (``CP2K_DFTD4_MIN_VERSION``).  Selecting it on an older build produces
+    input that aborts at CP2K parse time ("DFTD4 not available") only after
+    queue wait and wasted allocation.  The interactive upgrade path
+    (``recommend_dftd4_upgrade``) already checks the version, but the
+    ``--dispersion-scheme DFTD4`` CLI override previously bypassed every
+    version check; this guard closes that hole regardless of how DFTD4 was
+    selected.
+
+    Behaviour:
+      * resolved version known and below the floor -> ``ValueError``;
+      * version unknown (no CP2K probed and no ``--cp2k-min-version``)
+        -> loud warning only, because legitimate offline preparation may
+        target a newer cluster build than the local machine.
+
+    ``scheme`` is matched case-insensitively; non-DFTD4 schemes are no-ops.
+    """
+    if str(scheme or '').upper() != 'DFTD4':
+        return
+    floor = format_cp2k_version(CP2K_DFTD4_MIN_VERSION)
+    if cp2k_version_tuple is None:
+        warn(
+            f"DFTD4 dispersion selected ({source}) but the target CP2K version "
+            f"could not be verified. DFTD4 requires CP2K >= {floor}; ensure the "
+            f"run host provides it, or pass --cp2k-min-version, or use "
+            f"--dispersion-scheme DFTD3_BJ. Input will fail at parse time on "
+            f"builds older than {floor}."
+        )
+        return
+    if not cp2k_version_at_least(cp2k_version_tuple, CP2K_DFTD4_MIN_VERSION):
+        raise ValueError(
+            f"DFTD4 dispersion ({source}) requires CP2K >= {floor}, but the "
+            f"resolved CP2K version is {format_cp2k_version(cp2k_version_tuple)}. "
+            f"Use --dispersion-scheme DFTD3_BJ (universal) or run on "
+            f"CP2K >= {floor}."
+        )
 
 
 def validate_functional_dftd3_availability(functional, interactive=False,
@@ -6072,9 +6469,21 @@ def compute_qm_cell(qm_indices, coords, padding=6.0, box_dims=None, qmmm_periodi
     )
     qm_coords = []
     ncoord = len(coords or [])
+    # Audit fix H9: out-of-range QM indices must NOT be silently skipped — that
+    # yields an undersized QM cell (wrong QM sizing and QM/MM electrostatic
+    # coupling) with no error.  An index outside [1, ncoord] signals a
+    # coordinate/selection mismatch; fail loudly instead.
+    out_of_range = sorted({int(idx) for idx in (qm_indices or [])
+                           if not (0 < int(idx) <= ncoord)})
+    if out_of_range:
+        raise ValueError(
+            f"compute_qm_cell: {len(out_of_range)} QM index/indices out of range "
+            f"[1, {ncoord}] for the supplied coordinates: {out_of_range[:10]}"
+            f"{'...' if len(out_of_range) > 10 else ''}. The QM selection does not "
+            f"match the coordinate set."
+        )
     for idx in (qm_indices or []):
-        if 0 < int(idx) <= ncoord:
-            qm_coords.append(coords[int(idx) - 1])
+        qm_coords.append(coords[int(idx) - 1])
 
     if not qm_coords:
         return "25.0 25.0 25.0", {
@@ -6507,6 +6916,11 @@ CP2K_KEYWORD_MIN_VERSION = {
     # admm-dzp — newer curated auxiliary basis added in CP2K 8.1.
     # Ref: CP2K 8.1 release notes; BASIS_ADMM_MOLOPT header for 8.1+.
     'BASIS_ADMM_MOLOPT/admm-dzp': (8, 1),
+    # DFTD4 dispersion TYPE — needs the s-dftd4 library linked into CP2K,
+    # introduced in 8.1.  Ref: Caldeweyher et al., JCP 150, 154122 (2019);
+    # CP2K 8.1 release notes.  Kept in lock-step with CP2K_DFTD4_MIN_VERSION
+    # (consumed by recommend_dftd4_upgrade and validate_dispersion_scheme_version).
+    CP2K_DFTD4_TYPE_KEYWORD: CP2K_DFTD4_MIN_VERSION,
 }
 
 
@@ -6606,6 +7020,9 @@ def build_cp2k_capability(version_tuple, raw_version_line="",
 CP2K_OPTIONAL_ABOVE_HARD_FLOOR = frozenset({
     # admm-dzp is optional: V4 substitutes cpFIT3 when it is unavailable.
     'BASIS_ADMM_MOLOPT/admm-dzp',
+    # DFTD4 is optional: the universal DFTD3(BJ) scheme is the default and
+    # validate_dispersion_scheme_version refuses DFTD4 below its floor.
+    CP2K_DFTD4_TYPE_KEYWORD,
 })
 
 
@@ -10207,6 +10624,16 @@ DEFAULT_QMMM_QM_CELL_PADDING = 6.0
 DEFAULT_QMMM_TARGET_MULTIPOLE_RCUT = 8.0
 DEFAULT_QMMM_MINIMUM_IMAGE_BUFFER = 1.0
 MIN_QMMM_GEOMETRIC_RCUT_MARGIN = 0.1
+# Audit fix H13: unconstrained QM hydrogens (CP2K does not SHAKE QM atoms)
+# require a short integration step; above ~0.5 fs the fastest X-H stretch is
+# under-sampled and QM/MM MD drifts in energy / risks SCF failure.  A larger
+# step is a --strict gate concern, not a silent default.
+MAX_SAFE_QMMM_TIMESTEP_FS = 0.5
+# Audit fix M1: hard physical floor for the GEEP/MULTIPOLE RCUT. A QM cell so
+# small that the cell-limited RCUT falls below ~1 Å (e.g. a 0.5 Å cell -> ~0.15 Å)
+# truncates the QM/MM electrostatic coupling to essentially nothing, giving
+# catastrophically wrong energetics/forces with no error. Refuse such input.
+MIN_PHYSICAL_QMMM_RCUT = 1.0
 # CP2K's built-in tutorials and thermostat documentation distinguish short
 # CSVR time constants for active equilibration from weaker production coupling.
 # Keep the standard production MD thermostat conservative, but make the first
@@ -10521,6 +10948,16 @@ def evaluate_qmmm_periodic_electrostatics(qm_cell_abc, qmmm_periodic_policy=None
         max_valid_rcut = buffered_limit
     effective_rcut = min(target_rcut, max_valid_rcut)
     rcut_relaxed = effective_rcut + 1.0e-8 < target_rcut
+    # Audit fix M1: refuse a physically meaningless QM/MM coupling range.
+    if effective_rcut < MIN_PHYSICAL_QMMM_RCUT:
+        raise ValueError(
+            f"QM cell {cell_lengths} Å is too small for a usable QM/MM "
+            f"electrostatic coupling: the cell-limited MULTIPOLE RCUT would be "
+            f"{effective_rcut:.3f} Å, below the physical floor of "
+            f"{MIN_PHYSICAL_QMMM_RCUT:.1f} Å (target {target_rcut:.1f} Å). "
+            f"Enlarge the QM cell / padding or reduce the target RCUT to a value "
+            f"that fits at least twice within the cell."
+        )
     return {
         'cell_lengths': cell_lengths,
         'half_min_cell': float(half_min_cell),
@@ -10992,6 +11429,46 @@ def is_standard_molopt_basis_set(basis_set):
     return 'MOLOPT' in value and 'MOLOPT-SR' not in value and '-SR-' not in value
 
 
+# Standard GTH basis families that ship in CP2K's GTH_BASIS_SETS file, beyond
+# the MOLOPT presets, so a plausible custom label can still be recognized.
+_KNOWN_GTH_BASIS_LABELS = frozenset({
+    'SZV-GTH', 'DZV-GTH', 'DZVP-GTH', 'TZVP-GTH', 'TZV2P-GTH', 'TZV2PX-GTH',
+    'QZV2P-GTH', 'QZV3P-GTH',
+})
+
+
+def is_recognized_basis_set(basis_set):
+    """True if the basis label is a known preset or matches the standard
+    GTH/MOLOPT naming pattern (audit H11).
+
+    Recognized labels ship with CP2K (BASIS_MOLOPT / GTH_BASIS_SETS), so no
+    extra ``BASIS_SET_FILE_NAME`` is needed.  An unrecognized label is not
+    rejected — the user may supply a custom basis file — but it is flagged so
+    a typo does not surface only as a cryptic CP2K "no basis set found" error.
+    """
+    value = str(basis_set or '').strip().upper()
+    if not value:
+        return False
+    if value in {b.upper() for b in QM_BASIS_SET_PRESETS}:
+        return True
+    if 'MOLOPT' in value and value.endswith('-GTH'):
+        return True
+    return value in _KNOWN_GTH_BASIS_LABELS
+
+
+def basis_set_recognition_warning(basis_set):
+    """Return a warning string when the QM basis label is not a recognized CP2K
+    preset (custom basis needing an explicit file), else None (audit H11)."""
+    if is_recognized_basis_set(basis_set):
+        return None
+    return (
+        f"QM basis set '{str(basis_set).strip()}' is not a recognized CP2K "
+        f"GTH/MOLOPT preset; CP2K will fail at runtime with 'no basis set "
+        f"found' unless a matching BASIS_SET_FILE_NAME providing it is on the "
+        f"basis path. Check for a typo or supply the custom basis file."
+    )
+
+
 def validate_mgrid_ngrids(ngrids):
     """Validate CP2K MGRID NGRIDS value."""
     try:
@@ -11059,6 +11536,24 @@ def recommend_admm_aux_basis(qm_elements, basis_set=None):
     if not elems or elems <= STANDARD_BIO_ADMM_ELEMENTS:
         return DEFAULT_ADMM_AUX_BASIS
     return 'cFIT3'
+
+
+def admm_recommendation_uncovered_elements(qm_elements, basis_set=None,
+                                           cp2k_data_dir=None):
+    """QM elements the *recommended* ADMM auxiliary basis cannot cover
+    (audit M14).
+
+    Lets a caller surface an ADMM coverage problem at recommendation time —
+    e.g. a QM region containing Fe, for which every curated FIT3 auxiliary
+    basis lacks a Kind — instead of recommending a basis that the coverage gate
+    then rejects post-hoc.  Returns an (empty) set of uppercase symbols.
+    """
+    rec = recommend_admm_aux_basis(qm_elements, basis_set=basis_set)
+    if not rec:
+        return set()
+    elems = (list(qm_elements.keys()) if hasattr(qm_elements, 'keys')
+             else list(qm_elements or []))
+    return missing_admm_aux_basis_elements(elems, rec, cp2k_data_dir=cp2k_data_dir)
 
 
 def resolve_admm_aux_basis(qm_elements, aux_basis=None, use_admm=True, basis_set=None,
@@ -11203,6 +11698,90 @@ def missing_admm_aux_basis_elements(qm_elements, aux_basis, cp2k_data_dir=None):
         # expected to warn and require --admm-allow-unverified.
         return set()
     return elems - supported
+
+
+# ── Shared scientific gates (used by both the CLI and the TUI) ───────────────
+#
+# Audit fixes C2/C3/H12: the TUI was a second, weaker code path that skipped
+# several gates the CLI enforced.  These pure helpers centralise the gating
+# logic so both frontends call the *same* validated code and so the logic is
+# unit-testable without mounting a Textual app.
+def forbidden_link_bond_messages(links):
+    """Return a human-readable message per forbidden QM/MM link bond (C2).
+
+    A bond is forbidden when either frontier element is Kr-proxied in AMBER
+    (no covalent parameters → ill-defined IMOMM cap; Maseras & Morokuma 1995;
+    Peters et al., JCTC 6, 2935 (2010)).  Accepts both the CLI link-dict key
+    convention (``QM_ELEM``/``MM_ELEM``/``QM_INDEX``/``MM_INDEX``) and the TUI
+    one (``QM_ELEMENT``/``MM_ELEMENT``/``QM_ATOM_INDEX``/``MM_ATOM_INDEX``).
+    """
+    messages = []
+    for lnk in (links or []):
+        qm_e = lnk.get('QM_ELEM') or lnk.get('QM_ELEMENT')
+        mm_e = lnk.get('MM_ELEM') or lnk.get('MM_ELEMENT')
+        verdict = classify_forbidden_link_bond(qm_e, mm_e)
+        if verdict['forbidden']:
+            qi = lnk.get('QM_INDEX') or lnk.get('QM_ATOM_INDEX') or '?'
+            mi = lnk.get('MM_INDEX') or lnk.get('MM_ATOM_INDEX') or '?'
+            messages.append(
+                f"Forbidden link bond: QM {qm_e}{qi} — MM {mm_e}{mi}: "
+                f"{verdict['reason']} Widen the QM region to include the full "
+                f"coordination sphere, or supply a bonded force field."
+            )
+    return messages
+
+
+def admm_coverage_block_message(qm_elements, use_admm, basis_set=None,
+                                cp2k_data_dir=None):
+    """Return a blocking message when ADMM is on but the auxiliary basis does
+    not cover every QM element (C3); else ``None``.
+
+    Mirrors the CLI ADMM coverage gate: ADMM requires an auxiliary basis
+    covering every QM element (Guidon et al., JCTC 6, 2348 (2010)); a missing
+    AUX_FIT Kind is the documented silent failure (cryptic CP2K SCF-init error).
+    """
+    if not use_admm:
+        return None
+    elems = list(qm_elements.keys()) if hasattr(qm_elements, 'keys') else list(qm_elements or [])
+    if not elems:
+        return None
+    aux = resolve_admm_aux_basis(elems, use_admm=True, basis_set=basis_set)
+    if not aux:
+        return None
+    missing = missing_admm_aux_basis_elements(elems, aux, cp2k_data_dir=cp2k_data_dir)
+    if missing:
+        return (
+            f"ADMM auxiliary basis '{aux}' does not cover "
+            f"{', '.join(sorted(missing))}. Turn off ADMM, narrow the QM "
+            f"region, or supply a custom AUX_FIT basis "
+            f"(Guidon et al., JCTC 6, 2348 (2010))."
+        )
+    return None
+
+
+def validate_md_workflow_params(em_max_iter=None, mm_nvt_steps=None,
+                                mm_npt_steps=None, md_steps=None,
+                                md_timestep=None, md_temperature=None):
+    """Range-check MD workflow parameters (H12); return a list of error strings.
+
+    Mirrors the CLI argument validation (em/nvt/npt/prod steps >= 1, timestep
+    and temperature > 0) so the TUI cannot generate invalid CP2K MD settings
+    the CLI would have rejected.  ``None`` arguments are skipped (not checked).
+    """
+    errors = []
+    for value, name in (
+        (em_max_iter, "EM max iterations"),
+        (mm_nvt_steps, "MM NVT steps"),
+        (mm_npt_steps, "MM NPT steps"),
+        (md_steps, "Production MD steps"),
+    ):
+        if value is not None and int(value) < 1:
+            errors.append(f"{name} must be >= 1.")
+    if md_timestep is not None and float(md_timestep) <= 0:
+        errors.append("MD timestep must be > 0.")
+    if md_temperature is not None and float(md_temperature) <= 0:
+        errors.append("MD temperature must be > 0.")
+    return errors
 
 
 # ── Runtime CP2K data-file availability checks (A2.3) ────────────────────────
@@ -14200,14 +14779,25 @@ def _score_mdin_candidate(mdin_path):
 def locate_demo_data_dir():
     """Find the bundled demo system (alanine dipeptide), or None.
 
-    Looks next to this script (tests/fixtures) so a fresh checkout can run
-    ``charmmgui2cp2k --demo`` with no input files of its own.
+    Resolves in both layouts so ``charmmgui2cp2k --demo`` works with no input
+    files of its own, whether run from a source checkout (``demo/`` or
+    ``tests/fixtures/`` next to the script) or from a pip/pipx install (the
+    ``demo/`` data ships to ``<prefix>/share/charmmgui2cp2k/demo``).  An
+    explicit ``$CHARMMGUI2CP2K_DEMO_DIR`` overrides everything.
     """
     here = os.path.dirname(os.path.abspath(__file__))
-    for cand in (os.path.join(here, 'tests', 'fixtures'),
-                 os.path.join(here, 'demo'),
-                 os.path.join(here, 'fixtures')):
-        if os.path.isfile(os.path.join(cand, 'ala_dipeptide.parm7')):
+    candidates = [
+        os.environ.get('CHARMMGUI2CP2K_DEMO_DIR'),
+        os.path.join(here, 'demo'),
+        os.path.join(here, 'tests', 'fixtures'),
+        os.path.join(here, 'fixtures'),
+        # Installed data-files location (pip/pipx/venv), and the --user layout.
+        os.path.join(sys.prefix, 'share', 'charmmgui2cp2k', 'demo'),
+        os.path.join(sys.prefix, 'local', 'share', 'charmmgui2cp2k', 'demo'),
+        os.path.join(os.path.expanduser('~/.local'), 'share', 'charmmgui2cp2k', 'demo'),
+    ]
+    for cand in candidates:
+        if cand and os.path.isfile(os.path.join(cand, 'ala_dipeptide.parm7')):
             return cand
     return None
 
@@ -15095,7 +15685,7 @@ if HAS_TEXTUAL:
             # Fallback to PDB HETB/HETD tags.
             if not qm_indices and detected.get('pdb'):
                 try:
-                    pdb_elems, pdb_indices = extract_qm_from_pdb(detected['pdb'])
+                    pdb_elems, pdb_indices = extract_qm_from_pdb(detected['pdb'], topo=app.topo)
                     if pdb_indices:
                         qm_elements = pdb_elems
                         qm_indices = pdb_indices
@@ -15277,6 +15867,11 @@ if HAS_TEXTUAL:
         def validate(self, app):
             if app.topo is not None and app.qm_indices and not app.boundary_detection_done:
                 return False, ["Boundary detection is still running."]
+            # Audit fix C2: forbidden link bonds must block here, exactly as
+            # the CLI gates them — the TUI previously emitted them silently.
+            forbidden = forbidden_link_bond_messages(app.links or [])
+            if forbidden:
+                return False, forbidden
             return True, []
 
 
@@ -15393,6 +15988,28 @@ if HAS_TEXTUAL:
                 app.geep_lib  = int(self.query_one('#inp-geep', Input).value or str(DEFAULT_QMMM_GEEP_LIB))
             except (NoMatches, ValueError) as exc:
                 app.validation_records.append(('warn', f"method input: {exc}"))
+
+        def validate(self, app):
+            # Audit fix C3: block ADMM when the auxiliary basis cannot cover
+            # every QM element (the CLI enforces this; the TUI did not).
+            try:
+                use_admm = bool(self.query_one('#admm-switch', Switch).value)
+                basis_set = self.query_one('#basis-select', Select).value
+            except NoMatches:
+                use_admm = bool(getattr(app, 'use_admm', False))
+                basis_set = getattr(app, 'basis_set', None)
+            try:
+                msg = admm_coverage_block_message(
+                    app.qm_elements or {}, use_admm, basis_set=basis_set,
+                    cp2k_data_dir=os.environ.get('CP2K_DATA_DIR'),
+                )
+            except Exception:
+                # Never block on an internal coverage-resolution error;
+                # the CLI gate still runs at generation time as a backstop.
+                return True, []
+            if msg:
+                return False, [msg]
+            return True, []
 
 
     # ── Phase 5: ElectronicPhase ─────────────────────────────────────
@@ -15662,6 +16279,26 @@ if HAS_TEXTUAL:
                 app.handoff_policy_mode = self.query_one('#sel-handoff', Select).value
             except (NoMatches, ValueError) as exc:
                 app.validation_records.append(('warn', f"workflow: {exc}"))
+
+        def validate(self, app):
+            # Audit fix H12: range-check MD parameters, mirroring the CLI; the
+            # TUI previously accepted nonsensical values (e.g. 0 fs timestep).
+            def _num(wid, cast):
+                return cast((self.query_one(wid, Input).value or '0').strip())
+            try:
+                errors = validate_md_workflow_params(
+                    em_max_iter=_num('#inp-em', int),
+                    mm_nvt_steps=_num('#inp-nvt', int),
+                    mm_npt_steps=_num('#inp-npt', int),
+                    md_steps=_num('#inp-prod-steps', int),
+                    md_timestep=_num('#inp-prod-dt', float),
+                    md_temperature=_num('#inp-prod-T', float),
+                )
+            except (NoMatches, ValueError):
+                return False, ["Workflow parameters must all be valid numbers."]
+            if errors:
+                return False, errors
+            return True, []
 
 
     # ── Phase 7: PreviewPhase ────────────────────────────────────────
@@ -16163,7 +16800,15 @@ if HAS_TEXTUAL:
                     qm_elements, basis_set=w.basis_set, use_admm=w.use_admm,
                 )
                 if unresolved_qm_gth:
-                    log_msg("⚠", f"Unresolved GTH entries for: {sorted(unresolved_qm_gth)}")
+                    # Audit fix H2: unresolved GTH pseudopotentials produce
+                    # 'POTENTIAL …-qX' placeholders that crash CP2K at parse
+                    # time — abort generation instead of writing broken input
+                    # (the CLI already hard-stops here).
+                    log_msg("✗", f"Cannot generate valid CP2K input: no GTH "
+                                  f"pseudopotential for element(s) "
+                                  f"{sorted(unresolved_qm_gth)}. Remove them from "
+                                  f"the QM region or add a GTH_CHARGE_MAP entry.")
+                    return
 
                 qmmm_periodic_policy = make_qmmm_periodic_policy()
                 qm_cell_abc, _qm_cell_meta = compute_qm_cell(
@@ -16650,8 +17295,11 @@ def _main_cli_wizard():
     through Screens instead of sequential ask_* calls.
     """
     parser = argparse.ArgumentParser(
+        prog="charmmgui2cp2k",
         description="CHARMM-GUI → CP2K QM/MM Input Generator",
         formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--version', action='version',
+                        version=f'charmmgui2cp2k {__version__}')
     parser.add_argument('--dir', default='.', help='Input directory containing CHARMM-GUI outputs')
     parser.add_argument('--dry-run', action='store_true', help='Validate only, do not write files')
     parser.add_argument('--non-interactive', action='store_true', help='Use all defaults without prompting')
@@ -17396,6 +18044,7 @@ def _main_cli_wizard():
                 atom_types,
                 prmtop_path=detected.get('prmtop'),
                 crd_path=detected.get('rst7'),
+                interactive=interactive,
             )
             if not mdin_result[1]:
                 if len(mdin_candidates) > 1:
@@ -17428,7 +18077,7 @@ def _main_cli_wizard():
     # Strategy 2: Try PDB-based extraction (HETB/HETD segments)
     if not qm_indices and detected.get('pdb'):
         detail("Attempting QM extraction from PDB file (HETB/HETD segments)...")
-        qm_elements, qm_indices = extract_qm_from_pdb(detected['pdb'])
+        qm_elements, qm_indices = extract_qm_from_pdb(detected['pdb'], topo=topo)
         if qm_indices:
             info(f"Auto-detected {len(qm_indices)} QM atoms from PDB HETB/HETD segments")
             warn("PDB-based detection captures ligand/cofactor atoms only.")
@@ -18505,6 +19154,20 @@ def _main_cli_wizard():
         cp2k_capability=cp2k_capability,
         substitutions_log=admm_substitutions_log,
     )
+    # M14: surface an ADMM aux-basis coverage gap at recommendation time (e.g.
+    # a QM Fe that no curated FIT3 basis covers) rather than only rejecting it
+    # at the downstream coverage gate.
+    if use_admm:
+        _admm_uncovered = admm_recommendation_uncovered_elements(
+            qm_elements, basis_set=basis_set,
+        )
+        if _admm_uncovered:
+            warn(
+                f"ADMM auxiliary basis cannot cover "
+                f"{', '.join(sorted(_admm_uncovered))}; ADMM will be disabled "
+                f"at the coverage gate. Narrow the QM region or supply a custom "
+                f"AUX_FIT basis to keep ADMM (Guidon et al., JCTC 6, 2348 (2010))."
+            )
     admm_exch_correction_func = resolve_admm_exch_correction_func(
         functional,
         admm_exch_correction_func,
@@ -18696,6 +19359,20 @@ def _main_cli_wizard():
         cp2k_capability=cp2k_capability,
         substitutions_log=admm_substitutions_log,
     )
+    # M14: surface an ADMM aux-basis coverage gap at recommendation time (e.g.
+    # a QM Fe that no curated FIT3 basis covers) rather than only rejecting it
+    # at the downstream coverage gate.
+    if use_admm:
+        _admm_uncovered = admm_recommendation_uncovered_elements(
+            qm_elements, basis_set=basis_set,
+        )
+        if _admm_uncovered:
+            warn(
+                f"ADMM auxiliary basis cannot cover "
+                f"{', '.join(sorted(_admm_uncovered))}; ADMM will be disabled "
+                f"at the coverage gate. Narrow the QM region or supply a custom "
+                f"AUX_FIT basis to keep ADMM (Guidon et al., JCTC 6, 2348 (2010))."
+            )
     admm_exch_correction_func = resolve_admm_exch_correction_func(
         functional,
         admm_exch_correction_func,
@@ -19623,6 +20300,13 @@ def _main_cli_wizard():
                     if ask_yes("Keep this parity-inconsistent multiplicity anyway?", default=False):
                         break
                     continue
+                if parity_ok is None:
+                    # Audit fix M7: `is False` alone silently accepted a
+                    # multiplicity when the electron count was unknown
+                    # (unresolved elements).  Say so instead of passing mutely.
+                    warn("Parity unverifiable: the QM electron count is unknown "
+                         "(unresolved elements); multiplicity cannot be confirmed "
+                         "physically consistent.")
                 break
             # Re-derive decision as AUTHORITATIVE now that user confirmed.
             spin_decision = recommend_qm_spin_state(
@@ -19650,6 +20334,11 @@ def _main_cli_wizard():
                     if ask_yes("Keep this parity-inconsistent multiplicity anyway?", default=False):
                         break
                     continue
+                if parity_ok is None:
+                    # Audit fix M7 (see AMBIGUOUS path above).
+                    warn("Parity unverifiable: the QM electron count is unknown "
+                         "(unresolved elements); multiplicity cannot be confirmed "
+                         "physically consistent.")
                 break
             if multiplicity != spin_decision['multiplicity']:
                 spin_decision = recommend_qm_spin_state(
@@ -19696,7 +20385,19 @@ def _main_cli_wizard():
                 f"{qm_electrons} electrons.  Provide a parity-consistent "
                 f"--multiplicity value."
             )
-            sys.exit(1)
+            # Audit fix M11: a parity violation is a scientific-rigor failure;
+            # exit with STRICT_GATE_EXIT_CODE so CI/batch can distinguish it
+            # from a usage/input error (exit 1) or an argparse error (exit 2).
+            sys.exit(STRICT_GATE_EXIT_CODE)
+        elif parity_ok is None:
+            # Audit fix M8: `is False` alone silently accepted a multiplicity
+            # when the electron count was unknown.  Warn explicitly; the
+            # unresolved-elements gate concern carries the root cause under
+            # --strict.
+            warn(
+                f"QM electron count is unknown (unresolved elements); "
+                f"multiplicity {multiplicity} parity could not be verified."
+            )
 
     detail(f"QM multiplicity for CP2K &DFT: {multiplicity}")
     detail(f"Spin treatment: {'UKS (open-shell)' if multiplicity != 1 else 'RKS (singlet)'}")
@@ -20380,6 +21081,11 @@ def _main_cli_wizard():
     # POTENTIAL choice is committed to the input file.  See B.1.c for
     # the curated table and literature citations.
     qm_syms = list(qm_elements.keys())
+    # H11: flag a basis-set label CP2K will not recognize (typo / custom basis
+    # needing an explicit file) before it becomes a cryptic runtime failure.
+    _basis_warn = basis_set_recognition_warning(basis_set)
+    if _basis_warn:
+        warn(_basis_warn)
     _gth_pp_prefix = validate_functional_pp_match(
         functional,
         interactive=interactive,
@@ -20409,7 +21115,9 @@ def _main_cli_wizard():
             f"Add entries to GTH_CHARGE_MAP or remove these elements from "
             f"the QM region."
         )
-        sys.exit(1)
+        # Audit fix H2/M11: unrunnable input is a scientific-rigor failure;
+        # use STRICT_GATE_EXIT_CODE so CI can distinguish it from usage errors.
+        sys.exit(STRICT_GATE_EXIT_CODE)
     mm_topology_data = collect_topology_variant_data(
         topo,
         qm_syms,
@@ -20472,6 +21180,13 @@ def _main_cli_wizard():
         run_provenance=run_provenance,
     ):
         _dispersion_scheme_resolved = 'DFTD4'
+    # Audit fix C1: version-gate DFTD4 regardless of how it was selected
+    # (CLI override previously skipped every CP2K-version check).
+    validate_dispersion_scheme_version(
+        _dispersion_scheme_resolved,
+        (cp2k_capability.version if cp2k_capability else None),
+        source=('--dispersion-scheme' if dispersion_scheme_override else 'DFTD4 upgrade'),
+    )
     dft_config = make_dft_config(
         functional=functional,
         basis_set=basis_set,
@@ -21066,6 +21781,15 @@ def _main_cli_wizard():
             use_admm=use_admm, dispersion_scheme=_dispersion_scheme_resolved,
             cp2k_data_dir=_cp2k_data_dir,
         ),
+        # P1 (H6/H7/M9/M10) + C2/C4: also gate spin/boundary rigor risks that
+        # were previously warned-only, so --strict refuses them.
+        spin_decision=spin_decision,
+        qm_electron_meta=qm_e_meta,
+        link_bonds=links,
+        # P1 (H10/M13/H13/M15): accuracy-degradation parameters.
+        qmmm_periodic_meta=qmmm_periodic_meta,
+        md_timestep=md_timestep,
+        mgrid_cutoff=cutoff,
     )
     _gate_passed, _gate_exit = enforce_strict_generation_gate(_gate_concerns, _strict)
     if not _gate_passed:
@@ -21100,6 +21824,11 @@ def main():
     import sys as _sys
 
     _argv = _sys.argv[1:]
+    # --version works regardless of frontend (the -tui entry point would
+    # otherwise try to launch the TUI and ignore it).
+    if any(a == '--version' for a in _argv):
+        print(f"charmmgui2cp2k {__version__}")
+        return
     _use_tui = False
     _forced_no_tui = False
     _non_interactive = False
@@ -21219,8 +21948,9 @@ def main():
             f"--tui requested but Textual is not available "
             f"(Python {_sys.version_info.major}.{_sys.version_info.minor}; "
             f"error: {_textual_import_error}).{C.R}\n"
-            f"  {C.DIM}Falling back to plain CLI wizard. "
-            f"Install Textual with: python3.11 -m pip install textual{C.R}"
+            f"  {C.DIM}Falling back to plain CLI wizard. To enable the TUI: "
+            f"pipx install 'charmmgui2cp2k[tui]' (or pip install textual "
+            f"in this environment).{C.R}"
         )
         _main_cli_wizard()
     elif _use_tui and not _sys.stdin.isatty():

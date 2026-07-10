@@ -46,50 +46,82 @@ The generator does not just reformat files; it validates the QM/MM partition:
   (`run_provenance.txt`, `boundary_charges.json/.dat`, `electronic_state.dat`,
   compatibility report).
 
+## Quickstart
+
+```bash
+pipx install "charmmgui2cp2k[tui]"     # isolated install with the full-screen TUI
+charmmgui2cp2k --demo                   # try it now on the bundled QM/MM system
+charmmgui2cp2k /path/to/charmm-gui-output   # ...then on your own system
+```
+
+That is the whole path from nothing to a complete, runnable CP2K QM/MM input set.
+[`pipx`](https://pipx.pypa.io) installs it into its own environment and puts the
+`charmmgui2cp2k` / `charmmgui2cp2k-tui` commands on your `PATH`.
+
 ## Installation
 
-The wizard runs from a single script. The launcher builds an isolated Conda
-environment (Python 3.10 + Textual) on first use:
+Pick whichever fits — **no AmberTools, compilers, or Conda required.** The only
+runtime dependencies are ParmEd and NumPy (for correct topology preparation),
+both pip-installed automatically; Textual is an optional extra for the TUI.
+
+**A. pipx (recommended).** Isolated, one command, always up to date:
+
+```bash
+pipx install "charmmgui2cp2k[tui]"   # CLI + TUI
+pipx install charmmgui2cp2k          # CLI only
+```
+
+**B. pip into a virtual environment:**
+
+```bash
+python3 -m venv .venv && . .venv/bin/activate
+pip install "charmmgui2cp2k[tui]"    # drop [tui] for the CLI only
+```
+
+**C. Zero-config, no Python setup (Conda TUI launcher).** Clone and run — the
+`./tui` launcher builds an isolated Conda env (Python 3.10 + Textual) on first
+use and auto-detects your terminal:
 
 ```bash
 git clone https://github.com/aleff-ferreira/charmmgui2cp2k.git
 cd charmmgui2cp2k
-./tui install     # create/repair the local .conda-tui environment
+./tui                 # first run creates the env, then launches the TUI
+./tui doctor          # environment + terminal diagnostics
+./tui reset           # rebuild the environment
 ```
 
-Diagnostics and environment management:
-
-```bash
-./tui doctor      # environment + terminal diagnostics
-./tui --plan      # show the launch plan without starting
-./tui reset       # rebuild the environment
-```
+The **CLI wizard imports with the standard library only** (fast start; `--help`
+and `--version` work immediately), and pulls ParmEd + NumPy for the actual
+topology preparation at generation time. Textual is an optional extra used
+solely for the full-screen TUI.
 
 ## Usage
 
-```bash
-./tui                         # auto-detect terminal, launch the best frontend
-./tui /path/to/charmm-gui-output
-./tui --screen-safe           # compact mode for screen/tmux/Android/narrow TTYs
-./tui cli                     # plain CLI wizard
-```
-
-One-command quickstart on the bundled demo system (no input files needed):
+The `charmmgui2cp2k-tui` command launches the full-screen TUI; `charmmgui2cp2k`
+runs the plain CLI wizard. Both share one validated scientific core.
 
 ```bash
-charmmgui2cp2k --no-tui --demo          # generate from the bundled QM/MM demo
+charmmgui2cp2k-tui                       # full-screen TUI (needs the [tui] extra)
+charmmgui2cp2k                           # guided CLI wizard (current directory)
+charmmgui2cp2k /path/to/charmm-gui-output   # point it at your CHARMM-GUI/AMBER output
+charmmgui2cp2k --demo                    # one-command demo, no input files needed
+charmmgui2cp2k --non-interactive --strict --dir run/   # scripted / CI-safe run
 ```
 
-After activating the environment once (`conda activate ./.conda-tui`), the
-commands `charmmgui2cp2k` and `charmmgui2cp2k-tui` are available directly.
+`--strict` turns any unresolved scientific concern (bad boundary cut,
+parity-inconsistent spin, unrunnable input, …) into a non-zero exit, so bad
+setups never silently reach a queue.
 
-Keyboard: `Tab`/`Shift-Tab` move, `Enter` activates, `Ctrl-N` next phase,
-`Ctrl-P` back, `Ctrl-Q` quit, `F1` help.
+TUI keyboard: `Tab`/`Shift-Tab` move, `Enter` activates, `Ctrl-N` next phase,
+`Ctrl-P` back, `Ctrl-Q` quit, `F1` help. On GNU screen / tmux / Android / narrow
+terminals use the `./tui --screen-safe` launcher (or `charmmgui2cp2k-tui`, which
+auto-detects and adapts).
 
 ## Testing
 
 ```bash
-./.conda-tui/bin/python -m pytest -q tests/
+pip install "charmmgui2cp2k[dev]"   # or: ./.conda-tui/bin/python -m pytest -q tests/
+pytest -q tests/
 ```
 
 Tests are organized as `tests/unit/` (scientific-core unit tests),

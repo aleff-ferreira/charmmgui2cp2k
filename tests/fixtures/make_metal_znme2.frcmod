@@ -1,0 +1,18 @@
+metal test fragment (dimethylzinc) — dummy but valid bonded parameters
+MASS
+Zn 65.380
+
+BOND
+c3-Zn  120.0   1.950
+
+ANGL
+c3-Zn-c3  30.0  180.00
+Zn-c3-hc  40.0  109.50
+
+DIHE
+hc-c3-Zn-c3   1    0.000       0.000           3.000
+
+IMPROPER
+
+NONBON
+  Zn          1.1000    0.0125
