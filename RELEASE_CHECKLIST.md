@@ -11,14 +11,13 @@ has; the rest are mechanical.
 - [ ] **[user]** Add affiliation + ORCID in `CITATION.cff`, and any co-authors /
       affiliations in `paper/manuscript.md`.
 
-## 2. Internal scaffolding — DONE (moved to docs/dev/)
-The autonomous-agent working material has been moved out of the public top level
-into `docs/dev/` (reversible; `git rm -r docs/dev/` for total removal):
-- [x] `AGENTS.md` → `docs/dev/AGENTS.md`
-- [x] `prompt_kit/`, `prompt_kit_tui/` → `docs/dev/`
-- [x] `PUBLICATION_READINESS_PLAN.md` → `docs/dev/`
-- [ ] **[user]** decide whether to delete `docs/dev/` entirely before release.
-- [x] `.gitignore` excludes `.claude/`, envs, generated outputs.
+## 2. Internal notes
+`docs/dev/` holds developer methodology notes (the readiness roadmap and the
+scientific-rigor audit report). None of it is required to build, run, test, or
+cite the tool.
+- [ ] **[user]** decide whether to keep or remove `docs/dev/` before release
+      (`git rm -r docs/dev/` for total removal).
+- [x] `.gitignore` excludes local environments and generated outputs.
 
 ## 3. Make the repository public **[user]**
 - [ ] Create the public GitHub repo and push `main`

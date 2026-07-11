@@ -37,9 +37,7 @@ backup/
 *.swp
 *~
 
-# ── Agent / tooling local state (not for publication) ────────────────────
-.claude/
-.codex
+# ── AmberTools tleap log ─────────────────────────────────────────────────
 leap.log
 
 # ── Validation: bulky transient run dirs (wavefunctions, restarts) ───────

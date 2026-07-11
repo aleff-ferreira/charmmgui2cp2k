@@ -165,9 +165,8 @@ a `validation/` directory and a reproducible study:
 
 Reframe the goal precisely: *the primary workflow requires no external manual.*
 This is publishable substance — it maps onto peer-reviewed best-practice rules
-(Ten Simple Rules for Usable Software; FAIR4RS) that the paper will cite. The TUI
-design brief in `prompt_kit_tui/` already targets this; the work below closes the
-remaining gap and makes the claim defensible.
+(Ten Simple Rules for Usable Software; FAIR4RS) that the paper will cite. The work
+below closes the remaining gap and makes the claim defensible.
 
 - **B1. Defaults match visible source evidence.** Every defaulted value (QM region
   from `mdin`, charge, multiplicity, functional) must show *where it came from*
@@ -218,7 +217,8 @@ remaining gap and makes the claim defensible.
   need / gap → Architecture (single-script pipeline, three frontends, validated
   core) → Scientific safeguards (charge conservation, link atoms, spin risk,
   version gating) → Validation results (Track A4) → Usability/FAIR → Availability.
-  Reuse the `prompt_kit_tui` design brief language for the usability section.
+  Build the usability section around the defaults-with-evidence and
+  progressive-disclosure principles (Track B).
 - **C5. Figures.** (1) workflow/architecture diagram; (2) TUI screenshot walking an
   active-site QM/MM setup; (3) NVE energy-conservation plot; (4) boundary-scheme
   over-polarization probe; (5) cross-code agreement table.
@@ -227,7 +227,7 @@ remaining gap and makes the claim defensible.
 
 ---
 
-## 4. Phased execution roadmap (phase-gated, per AGENTS.md)
+## 4. Phased execution roadmap
 
 Each phase has an explicit **gate**: do not advance without the listed evidence.
 
@@ -237,7 +237,7 @@ Each phase has an explicit **gate**: do not advance without the listed evidence.
 | **P2 — Scientific test net** (A1, A2.1, A3.1) | Unit tests for core, ParmEd cross-check, golden regression baselines, cross-channel charge balance | ≥85% core coverage; ParmEd element/charge parity on all fixtures; regression suite locks outputs |
 | **P3 — Runtime + geometry hardening** (A2.3, A3.2–A3.4) | Data-file existence checks, link geometry checks, strict mode, decision trail | New checks unit-tested; `--strict` fails on scientific WARN; CP2K `--check` passes on all fixtures |
 | **P4 — Validation study** (A4) | NVE drift, cross-code agreement, boundary probe, benchmark suite, flavoenzyme (LAAO) case | `validation/` reproduces all figures; numbers meet targets and are DOI-confirmed |
-| **P5 — Usability pass** (Track B) | Defaults-with-evidence, progressive disclosure, actionable errors, embedded provenance, demo data, resize tests | Red-team user completes full workflow from UI alone, no manual; headless UX tests pass at 3 TTY sizes |
+| **P5 — Usability pass** (Track B) | Defaults-with-evidence, progressive disclosure, actionable errors, embedded provenance, demo data, resize tests | A first-time user completes the full workflow from the UI alone, no manual; headless UX tests pass at 3 TTY sizes |
 | **P6 — FAIR release + manuscript** (Track C) | Zenodo DOI, CITATION.cff, reproducibility capsule, manuscript draft | DOI minted; capsule reproduces figures; draft + cover letter ready |
 | **P7 — Submission** | Venue confirmed, submit | Editor confirmation (esp. if BiB); JOSS submission opened in parallel |
 
