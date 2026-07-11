@@ -1,0 +1,20 @@
+{
+  "title": "charmmgui2cp2k: automated CHARMM-GUI/AMBER to CP2K QM/MM input generator",
+  "description": "A terminal-native wizard (command-line and Textual TUI) that converts CHARMM-GUI QM/MM Interfacer / AMBER biomolecular setups into validated, immediately runnable CP2K QM/MM input files, with automated link-atom handling, boundary charge redistribution, spin-state risk analysis, and CP2K version-capability gating.",
+  "upload_type": "software",
+  "access_right": "open",
+  "license": "MIT",
+  "creators": [
+    { "name": "Ferreira, Aleff" }
+  ],
+  "keywords": [
+    "QM/MM",
+    "CP2K",
+    "CHARMM-GUI",
+    "AMBER",
+    "multiscale simulation",
+    "computational chemistry",
+    "molecular dynamics",
+    "input generation"
+  ]
+}
